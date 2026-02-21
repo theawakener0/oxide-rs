@@ -1,8 +1,7 @@
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
-    widgets::Block,
-    widgets::Widget,
+    widgets::{Block, Widget},
     Frame,
 };
 
@@ -10,6 +9,7 @@ use ratatui::{
 pub struct ChatWidget {
     messages: Vec<Message>,
     model_name: String,
+    streaming_message: Option<String>,
 }
 
 #[derive(Clone)]
@@ -23,6 +23,7 @@ impl ChatWidget {
         Self {
             messages: vec![],
             model_name: model_name.to_string(),
+            streaming_message: None,
         }
     }
 
@@ -31,6 +32,32 @@ impl ChatWidget {
             role: role.to_string(),
             content: content.to_string(),
         });
+        self.streaming_message = None;
+    }
+
+    pub fn start_streaming(&mut self, role: &str) {
+        self.streaming_message = Some(String::new());
+        self.messages.push(Message {
+            role: role.to_string(),
+            content: String::new(),
+        });
+    }
+
+    pub fn append_token(&mut self, token: &str) {
+        if let Some(ref mut streaming) = self.streaming_message {
+            streaming.push_str(token);
+            if let Some(last) = self.messages.last_mut() {
+                last.content.push_str(token);
+            }
+        }
+    }
+
+    pub fn finish_streaming(&mut self) {
+        self.streaming_message = None;
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        self.streaming_message.is_some()
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
@@ -41,7 +68,7 @@ impl ChatWidget {
         let inner_area = block.inner(area);
         block.render(area, f.buffer_mut());
 
-        let mut y = inner_area.y + inner_area.height - 1;
+        let mut y = inner_area.y + inner_area.height.saturating_sub(1);
 
         for msg in self.messages.iter().rev() {
             if y < inner_area.y {
@@ -55,22 +82,30 @@ impl ChatWidget {
             };
 
             let role_text = format!("{}: ", msg.role);
-            f.buffer_mut()
-                .set_string(inner_area.x, y, &role_text, role_style);
+            let role_width = role_text.len() as u16;
+            let available_width = inner_area.width;
 
-            let content_lines = wrap_text(
-                &msg.content,
-                (inner_area.width as usize).saturating_sub(role_text.len()),
-            );
+            if role_width < available_width {
+                f.buffer_mut()
+                    .set_string(inner_area.x, y, &role_text, role_style);
+            }
+
+            let content_width = (available_width as usize).saturating_sub(role_width as usize);
+            let content_lines = wrap_text(&msg.content, content_width);
 
             for line in content_lines.iter().rev() {
                 if y < inner_area.y {
                     break;
                 }
+                let display_line = if line.len() > available_width as usize {
+                    &line[..available_width as usize]
+                } else {
+                    line.as_str()
+                };
                 f.buffer_mut().set_string(
-                    inner_area.x + role_text.len() as u16,
+                    inner_area.x + role_width,
                     y,
-                    line,
+                    display_line,
                     Style::default(),
                 );
                 y = y.saturating_sub(1);
@@ -79,39 +114,39 @@ impl ChatWidget {
             y = y.saturating_sub(1);
         }
     }
-
-    pub fn clone(&self) -> Self {
-        Self {
-            messages: self.messages.clone(),
-            model_name: self.model_name.clone(),
-        }
-    }
 }
 
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 || max_width < 10 {
-        return vec![text.chars().take(200).collect()];
+        let truncated: String = text.chars().take(200).collect();
+        return vec![truncated];
     }
 
     let mut lines = Vec::new();
     let mut current_line = String::new();
 
-    for word in text.split_whitespace() {
-        if current_line.len() + word.len() + 1 > max_width {
+    for c in text.chars() {
+        if c == '\n' {
             if !current_line.is_empty() {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
+            lines.push(String::new());
+        } else if current_line.len() >= max_width {
+            lines.push(current_line.clone());
+            current_line.clear();
+            current_line.push(c);
+        } else {
+            current_line.push(c);
         }
-
-        if !current_line.is_empty() {
-            current_line.push(' ');
-        }
-        current_line.push_str(word);
     }
 
     if !current_line.is_empty() {
         lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
     }
 
     lines

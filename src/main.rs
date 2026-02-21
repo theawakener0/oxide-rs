@@ -1,3 +1,4 @@
+mod inference;
 mod model;
 mod ui;
 
@@ -7,7 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use model::ModelLoader;
+use inference::{Generator, StreamEvent};
 use ui::App;
 
 #[derive(Parser, Debug)]
@@ -15,9 +16,9 @@ use ui::App;
 struct Args {
     /// Path to GGUF model file
     #[arg(short, long)]
-    model: Option<PathBuf>,
+    model: PathBuf,
 
-    /// Path to tokenizer.json
+    /// Path to tokenizer.json (optional, will extract from GGUF if not provided)
     #[arg(short, long)]
     tokenizer: Option<PathBuf>,
 
@@ -27,19 +28,31 @@ struct Args {
 
     /// Temperature for sampling (0.0 = greedy)
     #[arg(long, default_value = "0.7")]
-    temperature: f32,
+    temperature: f64,
 
     /// Top-p sampling threshold
-    #[arg(long, default_value = "0.9")]
-    top_p: f32,
+    #[arg(long)]
+    top_p: Option<f64>,
 
     /// Top-k sampling
-    #[arg(long, default_value = "40")]
-    top_k: usize,
+    #[arg(long)]
+    top_k: Option<usize>,
 
     /// Repeat penalty
     #[arg(long, default_value = "1.1")]
     repeat_penalty: f32,
+
+    /// Context size for repeat penalty
+    #[arg(long, default_value = "64")]
+    repeat_last_n: usize,
+
+    /// Random seed
+    #[arg(long, default_value = "299792458")]
+    seed: u64,
+
+    /// Maximum conversation history in tokens
+    #[arg(long, default_value = "2048")]
+    max_history: usize,
 
     /// Prompt to use (if not using interactive mode)
     #[arg(short, long)]
@@ -54,38 +67,40 @@ fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "oxide=info,wat=error".into()),
+                .unwrap_or_else(|_| "oxide=info,candle=error".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     let args = Args::parse();
 
-    let model_path = if let Some(path) = args.model {
-        path
-    } else {
-        eprintln!("Error: --model is required");
-        eprintln!("Usage: oxide --model <path/to/model.gguf>");
-        std::process::exit(1);
-    };
+    tracing::info!(
+        "avx: {}, neon: {}, simd128: {}, f16c: {}",
+        candle_core::utils::with_avx(),
+        candle_core::utils::with_neon(),
+        candle_core::utils::with_simd128(),
+        candle_core::utils::with_f16c()
+    );
 
-    let tokenizer_path = args.tokenizer.unwrap_or_else(|| {
-        let mut p = model_path.clone();
-        p.set_file_name("tokenizer.json");
-        p
-    });
+    let generator = Generator::new(
+        &args.model,
+        args.tokenizer.as_ref(),
+        args.temperature,
+        args.top_p,
+        args.top_k,
+        args.seed,
+        args.max_history,
+    )?;
 
-    tracing::info!("Loading model from: {:?}", model_path);
-    tracing::info!("Loading tokenizer from: {:?}", tokenizer_path);
-
-    let model_loader = ModelLoader::new(model_path, tokenizer_path)?;
-    let model_info = model_loader.get_model_info();
+    let metadata = generator.metadata().clone();
 
     tracing::info!(
-        "Loaded model: {} ({} params, {} layers)",
-        model_info.name,
-        model_info.param_count,
-        model_info.n_layer
+        "Model: {} ({} layers, {} dim, {} context, {} vocab)",
+        metadata.name,
+        metadata.n_layer,
+        metadata.n_embd,
+        metadata.context_length,
+        metadata.vocab_size
     );
 
     if args.once {
@@ -93,24 +108,38 @@ fn main() -> Result<()> {
             .prompt
             .unwrap_or_else(|| "Write a hello world program in Rust".to_string());
 
-        let output = model_loader.generate(
+        println!("Prompt: {}\n", prompt);
+        println!("---");
+
+        let mut gen = generator;
+        gen.generate(
             &prompt,
             args.max_tokens,
-            args.temperature,
-            args.top_p,
-            args.top_k,
             args.repeat_penalty,
+            args.repeat_last_n,
+            |event| match event {
+                StreamEvent::Token(t) => print!("{}", t),
+                StreamEvent::Done { tokens_generated } => {
+                    println!("\n---\nGenerated {} tokens", tokens_generated);
+                }
+                StreamEvent::Error(e) => eprintln!("Error: {}", e),
+            },
         )?;
 
-        println!("{}", output);
+        println!();
     } else {
         let mut app = App::new(
-            model_loader,
+            generator,
+            args.model,
+            args.tokenizer,
             args.max_tokens,
             args.temperature,
             args.top_p,
             args.top_k,
             args.repeat_penalty,
+            args.repeat_last_n,
+            args.seed,
+            args.max_history,
         );
         app.run()?;
     }
