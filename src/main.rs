@@ -2,15 +2,12 @@ mod cli;
 mod inference;
 mod model;
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use clap::Parser;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use cli::{print_banner, History, Output, Spinner, StreamOutput};
@@ -160,25 +157,14 @@ fn main() -> Result<()> {
 fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Result<()> {
     let mut history = History::load();
     let mut generator = generator;
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-
-    let ctrl_c_flag = cancel_flag.clone();
-    ctrlc::set_handler(move || {
-        ctrl_c_flag.store(true, Ordering::Relaxed);
-    })?;
 
     loop {
-        if cancel_flag.load(Ordering::Relaxed) {
-            break;
-        }
-
         output.print_input_prompt();
         io::stdout().flush()?;
 
-        let prompt = match read_line_with_escape()? {
-            Some(p) => p,
-            None => continue,
-        };
+        let mut prompt = String::new();
+        io::stdin().read_line(&mut prompt)?;
+        let prompt = prompt.trim().to_string();
 
         if prompt.is_empty() {
             continue;
@@ -205,37 +191,25 @@ fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Res
         let mut stream = StreamOutput::new();
         let mut token_count = 0;
         let start = Instant::now();
-        let gen_cancel = cancel_flag.clone();
 
         history.add("user", &prompt);
 
-        let result = generator.generate(
+        generator.generate(
             &prompt,
             args.max_tokens,
             args.repeat_penalty,
             args.repeat_last_n,
-            |event| {
-                if gen_cancel.load(Ordering::Relaxed) {
-                    return;
+            |event| match event {
+                StreamEvent::Token(t) => {
+                    stream.print_token(&t);
+                    token_count += 1;
                 }
-                match event {
-                    StreamEvent::Token(t) => {
-                        stream.print_token(&t);
-                        token_count += 1;
-                    }
-                    StreamEvent::Done => {
-                        stream.finish();
-                        output.print_stats(token_count, start.elapsed());
-                    }
+                StreamEvent::Done => {
+                    stream.finish();
+                    output.print_stats(token_count, start.elapsed());
                 }
             },
-        );
-
-        if let Err(e) = result {
-            output.print_error(&e.to_string());
-        } else if cancel_flag.load(Ordering::Relaxed) {
-            output.print_cancelled();
-        }
+        )?;
 
         history.save();
         output.print_separator();
@@ -243,49 +217,6 @@ fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Res
 
     history.save();
     Ok(())
-}
-
-fn read_line_with_escape() -> Result<Option<String>> {
-    enable_raw_mode()?;
-    let mut line = String::new();
-    let stdin = io::stdin();
-    let mut stdin = stdin.lock();
-
-    loop {
-        let mut buf = [0; 1];
-        if stdin.read_exact(&mut buf).is_err() {
-            break;
-        }
-
-        match buf[0] {
-            b'\n' | b'\r' => {
-                disable_raw_mode()?;
-                println!();
-                return Ok(Some(line));
-            }
-            0x1b => {
-                disable_raw_mode()?;
-                println!(" ^C");
-                return Ok(None);
-            }
-            0x7f | 0x08 => {
-                if !line.is_empty() {
-                    line.pop();
-                    print!("\x08 \x08");
-                    io::stdout().flush()?;
-                }
-            }
-            c if c >= 0x20 && c < 0x7f => {
-                line.push(c as char);
-                print!("{}", c as char);
-                io::stdout().flush()?;
-            }
-            _ => {}
-        }
-    }
-
-    disable_raw_mode()?;
-    Ok(Some(line))
 }
 
 fn format_size(size: u64) -> String {

@@ -81,33 +81,11 @@ impl Output {
         .ok();
     }
 
-    pub fn print_cancelled(&mut self) {
-        execute!(
-            self.stdout,
-            Print("\n"),
-            SetForegroundColor(Color::Yellow),
-            Print("  [Generation cancelled]"),
-            ResetColor,
-            Print("\n"),
-        )
-        .ok();
-    }
-
-    pub fn print_error(&mut self, msg: &str) {
-        execute!(
-            self.stdout,
-            SetForegroundColor(Color::Red),
-            Print(format!("Error: {}\n", msg)),
-            ResetColor,
-        )
-        .ok();
-    }
-
     pub fn print_welcome(&mut self) {
         execute!(
             self.stdout,
             SetForegroundColor(Color::DarkGrey),
-            Print("  Type your message and press Enter. Press ESC to cancel, Ctrl+C to exit.\n"),
+            Print("  Type your message and press Enter. Ctrl+C to cancel or exit.\n"),
             ResetColor,
         )
         .ok();
