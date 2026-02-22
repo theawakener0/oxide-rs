@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -69,37 +68,66 @@ impl Model {
     ) -> Result<GgufMetadata> {
         let md = &content.metadata;
 
-        let get_u32 = |key: &str| -> Result<usize> {
-            match md.get(key) {
-                Some(v) => v
+        let arch: String = match md.get("general.architecture") {
+            Some(v) => v
+                .to_string()
+                .map(|s| s.clone())
+                .unwrap_or_else(|_| "llama".to_string()),
+            None => "llama".to_string(),
+        };
+
+        let get_with_prefix = |key: &str| -> Result<usize> {
+            let full_key = format!("{}.{}", arch, key);
+            if let Some(v) = md.get(&full_key) {
+                return v
                     .to_u32()
                     .map(|v| v as usize)
-                    .with_context(|| format!("Failed to parse {} as u32", key)),
-                None => bail!("Missing metadata key: {}", key),
+                    .with_context(|| format!("Failed to parse {} as u32", full_key));
             }
+
+            for prefix in &["llama", "qwen", "mistral", "phi", "gemma"] {
+                let alt_key = format!("{}.{}", prefix, key);
+                if let Some(v) = md.get(&alt_key) {
+                    return v
+                        .to_u32()
+                        .map(|v| v as usize)
+                        .with_context(|| format!("Failed to parse {} as u32", alt_key));
+                }
+            }
+
+            bail!("Missing metadata key: {} (tried {}.{})", key, arch, key)
         };
 
-        let get_u32_or = |key: &str, default: usize| -> usize {
-            md.get(key)
-                .and_then(|v| v.to_u32().ok())
-                .map(|v| v as usize)
-                .unwrap_or(default)
+        let get_with_prefix_or = |key: &str, default: usize| -> usize {
+            let full_key = format!("{}.{}", arch, key);
+            if let Some(v) = md.get(&full_key).and_then(|v| v.to_u32().ok()) {
+                return v as usize;
+            }
+
+            for prefix in &["llama", "qwen", "mistral", "phi", "gemma"] {
+                let alt_key = format!("{}.{}", prefix, key);
+                if let Some(v) = md.get(&alt_key).and_then(|v| v.to_u32().ok()) {
+                    return v as usize;
+                }
+            }
+
+            default
         };
 
-        let (name, arch) = Self::detect_architecture(filename);
+        let (name, _) = Self::detect_architecture(filename);
 
-        let n_head = get_u32("llama.attention.head_count")?;
-        let n_head_kv = get_u32_or("llama.attention.head_count_kv", n_head);
+        let n_head = get_with_prefix("attention.head_count")?;
+        let n_head_kv = get_with_prefix_or("attention.head_count_kv", n_head);
 
         Ok(GgufMetadata {
             name,
-            architecture: arch,
-            n_layer: get_u32("llama.block_count")?,
-            n_embd: get_u32("llama.embedding_length")?,
+            architecture: arch.clone(),
+            n_layer: get_with_prefix("block_count")?,
+            n_embd: get_with_prefix("embedding_length")?,
             n_head,
             n_head_kv,
-            vocab_size: get_u32("llama.vocab_size")?,
-            context_length: get_u32_or("llama.context_length", 4096),
+            vocab_size: get_with_prefix("vocab_size")?,
+            context_length: get_with_prefix_or("context_length", 4096),
             file_size,
         })
     }

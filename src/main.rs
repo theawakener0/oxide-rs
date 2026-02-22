@@ -1,15 +1,21 @@
+mod cli;
 mod inference;
 mod model;
-mod ui;
 
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use clap::Parser;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use cli::{print_banner, History, Output, Spinner, StreamOutput};
 use inference::{Generator, StreamEvent};
-use ui::App;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -61,28 +67,28 @@ struct Args {
     /// Run in non-interactive mode (generate and exit)
     #[arg(short, long)]
     once: bool,
+
+    /// Clear conversation history
+    #[arg(long)]
+    clear_history: bool,
 }
 
 fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "oxide=info,candle=error".into()),
+                .unwrap_or_else(|_| "oxide=error".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     let args = Args::parse();
 
-    tracing::info!(
-        "avx: {}, neon: {}, simd128: {}, f16c: {}",
-        candle_core::utils::with_avx(),
-        candle_core::utils::with_neon(),
-        candle_core::utils::with_simd128(),
-        candle_core::utils::with_f16c()
-    );
+    print_banner();
 
-    let generator = Generator::new(
+    let spinner = Spinner::new("Loading model...");
+
+    let generator = match Generator::new(
         &args.model,
         args.tokenizer.as_ref(),
         args.temperature,
@@ -90,59 +96,214 @@ fn main() -> Result<()> {
         args.top_k,
         args.seed,
         args.max_history,
-    )?;
+    ) {
+        Ok(g) => g,
+        Err(e) => {
+            spinner.finish_with_error(&format!("Failed to load model: {}", e));
+            return Err(e);
+        }
+    };
 
     let metadata = generator.metadata().clone();
+    spinner.finish(&format!(
+        "Model loaded: {} ({} layers, {} dim)",
+        metadata.name, metadata.n_layer, metadata.n_embd
+    ));
 
-    tracing::info!(
-        "Model: {} ({} layers, {} dim, {} context, {} vocab)",
-        metadata.name,
-        metadata.n_layer,
-        metadata.n_embd,
-        metadata.context_length,
-        metadata.vocab_size
-    );
+    let mut output = Output::new();
+    output.print_model_info(&metadata.name, &format_size(metadata.file_size), "Q4_K_M");
+
+    if args.clear_history {
+        let mut history = History::load();
+        history.clear();
+        println!("  History cleared.");
+    }
 
     if args.once {
         let prompt = args
             .prompt
             .unwrap_or_else(|| "Write a hello world program in Rust".to_string());
 
-        println!("Prompt: {}\n", prompt);
-        println!("---");
+        output.print_prompt(&prompt);
 
         let mut gen = generator;
+        let mut stream = StreamOutput::new();
+        let mut token_count = 0;
+        let start = Instant::now();
+
         gen.generate(
             &prompt,
             args.max_tokens,
             args.repeat_penalty,
             args.repeat_last_n,
             |event| match event {
-                StreamEvent::Token(t) => print!("{}", t),
-                StreamEvent::Done { tokens_generated } => {
-                    println!("\n---\nGenerated {} tokens", tokens_generated);
+                StreamEvent::Token(t) => {
+                    stream.print_token(&t);
+                    token_count += 1;
                 }
-                StreamEvent::Error(e) => eprintln!("Error: {}", e),
+                StreamEvent::Done { .. } => {
+                    stream.finish();
+                    output.print_stats(token_count, start.elapsed());
+                }
+                StreamEvent::Error(e) => {
+                    output.print_error(&e);
+                }
             },
         )?;
 
-        println!();
-    } else {
-        let mut app = App::new(
-            generator,
-            args.model,
-            args.tokenizer,
-            args.max_tokens,
-            args.temperature,
-            args.top_p,
-            args.top_k,
-            args.repeat_penalty,
-            args.repeat_last_n,
-            args.seed,
-            args.max_history,
-        );
-        app.run()?;
+        return Ok(());
     }
 
+    output.print_separator();
+    output.print_welcome();
+    output.print_separator();
+
+    interactive_mode(generator, args, output)
+}
+
+fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Result<()> {
+    let mut history = History::load();
+    let mut generator = generator;
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+
+    let ctrl_c_flag = cancel_flag.clone();
+    ctrlc::set_handler(move || {
+        ctrl_c_flag.store(true, Ordering::Relaxed);
+    })?;
+
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
+        output.print_input_prompt();
+        io::stdout().flush()?;
+
+        let prompt = match read_line_with_escape()? {
+            Some(p) => p,
+            None => continue,
+        };
+
+        if prompt.is_empty() {
+            continue;
+        }
+
+        if prompt == "/exit" || prompt == "/quit" {
+            break;
+        }
+
+        if prompt == "/clear" {
+            history.clear();
+            println!("  History cleared.\n");
+            continue;
+        }
+
+        if prompt == "/help" {
+            println!("  Commands:");
+            println!("    /clear  - Clear conversation history");
+            println!("    /exit   - Exit the program");
+            println!("    /help   - Show this help\n");
+            continue;
+        }
+
+        let mut stream = StreamOutput::new();
+        let mut token_count = 0;
+        let start = Instant::now();
+        let gen_cancel = cancel_flag.clone();
+
+        history.add("user", &prompt);
+
+        let result = generator.generate(
+            &prompt,
+            args.max_tokens,
+            args.repeat_penalty,
+            args.repeat_last_n,
+            |event| {
+                if gen_cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                match event {
+                    StreamEvent::Token(t) => {
+                        stream.print_token(&t);
+                        token_count += 1;
+                    }
+                    StreamEvent::Done { .. } => {
+                        stream.finish();
+                        output.print_stats(token_count, start.elapsed());
+                    }
+                    StreamEvent::Error(e) => {
+                        stream.finish();
+                        output.print_error(&e);
+                    }
+                }
+            },
+        );
+
+        if let Err(e) = result {
+            output.print_error(&e.to_string());
+        } else if cancel_flag.load(Ordering::Relaxed) {
+            output.print_cancelled();
+        }
+
+        history.save();
+        output.print_separator();
+    }
+
+    history.save();
     Ok(())
+}
+
+fn read_line_with_escape() -> Result<Option<String>> {
+    enable_raw_mode()?;
+    let mut line = String::new();
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+
+    loop {
+        let mut buf = [0; 1];
+        if stdin.read_exact(&mut buf).is_err() {
+            break;
+        }
+
+        match buf[0] {
+            b'\n' | b'\r' => {
+                disable_raw_mode()?;
+                println!();
+                return Ok(Some(line));
+            }
+            0x1b => {
+                disable_raw_mode()?;
+                println!(" ^C");
+                return Ok(None);
+            }
+            0x7f | 0x08 => {
+                if !line.is_empty() {
+                    line.pop();
+                    print!("\x08 \x08");
+                    io::stdout().flush()?;
+                }
+            }
+            c if c >= 0x20 && c < 0x7f => {
+                line.push(c as char);
+                print!("{}", c as char);
+                io::stdout().flush()?;
+            }
+            _ => {}
+        }
+    }
+
+    disable_raw_mode()?;
+    Ok(Some(line))
+}
+
+fn format_size(size: u64) -> String {
+    if size < 1_000 {
+        format!("{}B", size)
+    } else if size < 1_000_000 {
+        format!("{:.1}KB", size as f64 / 1e3)
+    } else if size < 1_000_000_000 {
+        format!("{:.1}MB", size as f64 / 1e6)
+    } else {
+        format!("{:.1}GB", size as f64 / 1e9)
+    }
 }
