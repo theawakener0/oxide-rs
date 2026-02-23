@@ -21,6 +21,8 @@
 - **Memory-Mapped Loading** — OS-managed paging for instant load times and lower memory usage
 - **Auto Thread Tuning** — Automatically detects optimal thread count for your CPU
 - **Pre-allocated Buffers** — Zero-copy runtime allocations for smooth generation
+- **Tokenizer Caching** — Caches tokenizer to disk for faster subsequent loads
+- **Page Prefetching** — Preloads hot model pages into memory for faster first-token
 
 ## Installation
 

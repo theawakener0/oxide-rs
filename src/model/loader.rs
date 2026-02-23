@@ -31,8 +31,18 @@ pub struct Model {
     metadata: GgufMetadata,
 }
 
+pub struct ModelWithMmap {
+    pub model: Model,
+    pub mmap: Mmap,
+}
+
 impl Model {
     pub fn load(path: &PathBuf) -> Result<Self> {
+        let (_, model) = Self::load_with_mmap(path)?;
+        Ok(model)
+    }
+
+    pub fn load_with_mmap(path: &PathBuf) -> Result<(Mmap, Self)> {
         let file_size = std::fs::metadata(path)?.len();
         let filename = path
             .file_name()
@@ -48,7 +58,7 @@ impl Model {
 
         let mmap = unsafe { Mmap::map(&file)? };
 
-        let mut cursor = Cursor::new(mmap);
+        let mut cursor = Cursor::new(&mmap);
 
         let content = gguf_file::Content::read(&mut cursor)
             .with_context(|| format!("Failed to read GGUF file: {:?}", path))?;
@@ -79,7 +89,27 @@ impl Model {
 
         tracing::info!("Model loaded successfully");
 
-        Ok(Self { inner, metadata })
+        let model = Self { inner, metadata };
+        Ok((mmap, model))
+    }
+
+    pub fn prefetch_mmap(mmap: &Mmap) {
+        let size = mmap.len();
+        let ptr = mmap.as_ptr() as *mut std::ffi::c_void;
+
+        unsafe {
+            // Set sequential access pattern
+            libc::madvise(ptr, size, libc::MADV_SEQUENTIAL);
+
+            // Prefetch first 128MB (embeddings + early layers + vocab)
+            let prefetch_size = std::cmp::min(128 * 1024 * 1024, size);
+            libc::madvise(ptr, prefetch_size, libc::MADV_WILLNEED);
+        }
+
+        tracing::info!(
+            "Prefetched {} MB of model data",
+            std::cmp::min(128, size / 1_000_000)
+        );
     }
 
     fn extract_metadata(

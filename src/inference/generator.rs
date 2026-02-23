@@ -68,7 +68,9 @@ impl Generator {
     ) -> Result<Self> {
         tracing::info!("Loading model from: {:?}", model_path);
 
-        let model = Model::load(model_path)?;
+        let (mmap, model) = Model::load_with_mmap(model_path)?;
+        Model::prefetch_mmap(&mmap);
+
         let metadata = model.metadata().clone();
         let template = ChatTemplate::new(metadata.chat_template.clone())?;
 
