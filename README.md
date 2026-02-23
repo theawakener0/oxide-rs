@@ -108,31 +108,6 @@ Oxide automatically detects and applies the correct chat template based on model
 | Mistral / Zephyr | `[INST] ... [/INST]` |
 | Phi | `user\n...<\|end\|>` |
 
-## Project Structure
-
-```
-oxide/
-├── src/
-│   ├── main.rs           # Entry point, CLI parsing, interactive loop
-│   ├── cli/
-│   │   ├── mod.rs        # CLI module exports
-│   │   ├── banner.rs     # ASCII art banner with animation
-│   │   ├── history.rs    # Conversation history persistence
-│   │   ├── loader.rs     # Animated model loading indicator
-│   │   ├── stream.rs     # Streaming output with metrics
-│   │   └── theme.rs      # Terminal color theme constants
-│   ├── inference/
-│   │   ├── mod.rs        # Inference module exports
-│   │   └── generator.rs  # Token generation, sampling, chat templates
-│   └── model/
-│       ├── mod.rs        # Model module exports
-│       ├── loader.rs     # GGUF loading, metadata extraction
-│       └── tokenizer.rs  # Tokenizer wrapper with streaming decode
-├── Cargo.toml
-├── Makefile
-└── README.md
-```
-
 ## Architecture
 
 ```
@@ -205,10 +180,8 @@ make clean
 
 ## Roadmap
 
-- [ ] GPU acceleration (CUDA/Metal)
 - [ ] Multi-modal support
 - [ ] OpenAI-compatible API server
-- [ ] RAG integration
 - [ ] Model download/management
 
 ## License
