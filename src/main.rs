@@ -4,13 +4,15 @@ mod model;
 
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::time::Instant;
 
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use cli::{print_banner, History, Output, Spinner, StreamOutput};
+use cli::{
+    print_banner, print_divider, print_model_info, print_welcome, History, ModelLoader,
+    PromptDisplay, StreamOutput,
+};
 use inference::{Generator, StreamEvent};
 
 #[derive(Parser, Debug)]
@@ -82,7 +84,7 @@ fn main() -> Result<()> {
 
     print_banner();
 
-    let spinner = Spinner::new("Loading model...");
+    let loader = ModelLoader::new("Loading model...");
 
     let generator = match Generator::new(
         &args.model,
@@ -95,19 +97,24 @@ fn main() -> Result<()> {
     ) {
         Ok(g) => g,
         Err(e) => {
-            spinner.finish_with_error(&format!("Failed to load model: {}", e));
+            loader.finish_with_error(&format!("Failed to load model: {}", e));
             return Err(e);
         }
     };
 
     let metadata = generator.metadata().clone();
-    spinner.finish(&format!(
-        "Model loaded: {} ({} layers, {} dim)",
+    loader.finish(&format!(
+        "{} loaded ({} layers, {} dim)",
         metadata.name, metadata.n_layer, metadata.n_embd
     ));
 
-    let mut output = Output::new();
-    output.print_model_info(&metadata.name, &format_size(metadata.file_size), "Q4_K_M");
+    print_model_info(
+        &metadata.name,
+        &format_size(metadata.file_size),
+        "Q4_K_M",
+        metadata.n_layer,
+        metadata.n_embd,
+    );
 
     if args.clear_history {
         let mut history = History::load();
@@ -120,12 +127,11 @@ fn main() -> Result<()> {
             .prompt
             .unwrap_or_else(|| "Write a hello world program in Rust".to_string());
 
-        output.print_prompt(&prompt);
+        let mut prompt_display = PromptDisplay::new();
+        prompt_display.show_user_input(&prompt);
 
         let mut gen = generator;
         let mut stream = StreamOutput::new();
-        let mut token_count = 0;
-        let start = Instant::now();
 
         gen.generate(
             &prompt,
@@ -135,11 +141,9 @@ fn main() -> Result<()> {
             |event| match event {
                 StreamEvent::Token(t) => {
                     stream.print_token(&t);
-                    token_count += 1;
                 }
                 StreamEvent::Done => {
                     stream.finish();
-                    output.print_stats(token_count, start.elapsed());
                 }
             },
         )?;
@@ -147,19 +151,20 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    output.print_separator();
-    output.print_welcome();
-    output.print_separator();
+    print_divider();
+    print_welcome();
+    print_divider();
 
-    interactive_mode(generator, args, output)
+    interactive_mode(generator, args)
 }
 
-fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Result<()> {
+fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
     let mut history = History::load();
     let mut generator = generator;
+    let mut prompt_display = PromptDisplay::new();
 
     loop {
-        output.print_input_prompt();
+        prompt_display.show_input_prompt();
         io::stdout().flush()?;
 
         let mut prompt = String::new();
@@ -189,8 +194,6 @@ fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Res
         }
 
         let mut stream = StreamOutput::new();
-        let mut token_count = 0;
-        let start = Instant::now();
 
         history.add("user", &prompt);
 
@@ -202,17 +205,15 @@ fn interactive_mode(generator: Generator, args: Args, mut output: Output) -> Res
             |event| match event {
                 StreamEvent::Token(t) => {
                     stream.print_token(&t);
-                    token_count += 1;
                 }
                 StreamEvent::Done => {
                     stream.finish();
-                    output.print_stats(token_count, start.elapsed());
                 }
             },
         )?;
 
         history.save();
-        output.print_separator();
+        print_divider();
     }
 
     history.save();
