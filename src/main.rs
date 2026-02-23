@@ -1,19 +1,14 @@
-mod cli;
-mod inference;
-mod model;
-
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-use cli::{
+use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
     StreamOutput,
 };
-use inference::{Generator, StreamEvent};
+use oxide_rs::inference::{Generator, StreamEvent};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful, honest, and accurate AI assistant. If you don't know something, say so clearly. Do not make up information or hallucinate facts.";
 
@@ -77,7 +72,7 @@ fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "oxide=error".into()),
+                .unwrap_or_else(|_| "oxide_rs=error".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

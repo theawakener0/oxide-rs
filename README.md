@@ -1,6 +1,6 @@
-# Oxide
+# Oxide-rs
 
-**Fast AI Inference CLI in Rust** — A lightweight, CPU-based LLM inference engine inspired by llama.cpp.
+**Fast AI Inference Library & CLI in Rust** — A lightweight, CPU-based LLM inference engine inspired by llama.cpp.
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -35,8 +35,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/oxide.git
-cd oxide
+git clone https://github.com/yourusername/oxide-rs.git
+cd oxide-rs
 
 # Build release binary
 make build
@@ -49,7 +49,7 @@ cargo build --release
 
 ```bash
 make install
-# Installs to ~/.local/bin/oxide
+# Installs to ~/.local/bin/oxide-rs
 ```
 
 ### Environment Variables
@@ -71,16 +71,16 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 
 ```bash
 # Interactive chat mode (uses default helpful system prompt)
-./target/release/oxide --model ~/Models/your-model-Q4_K_M.gguf
+./target/release/oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
 
 # With custom system prompt
-./target/release/oxide --model ~/Models/model.gguf --system "You are a Rust expert."
+./target/release/oxide-rs --model ~/Models/model.gguf --system "You are a Rust expert."
 
 # One-shot generation
-./target/release/oxide --model ~/Models/model.gguf --once --prompt "Write a Rust function to reverse a string"
+./target/release/oxide-rs --model ~/Models/model.gguf --once --prompt "Write a Rust function to reverse a string"
 
 # With custom sampling parameters
-./target/release/oxide --model ~/Models/model.gguf \
+./target/release/oxide-rs --model ~/Models/model.gguf \
   --temperature 0.8 \
   --top-k 40 \
   --top-p 0.9 \

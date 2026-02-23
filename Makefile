@@ -3,11 +3,11 @@
 MODEL ?= $(HOME)/Models/LFM2.5-1.2B-Instruct-Q4_K_M.gguf
 
 help:
-	@echo "Oxide - Fast AI Inference CLI"
+	@echo "Oxide-rs - Fast AI Inference Library & CLI"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build      Build release binary"
-	@echo "  make run        Run oxide with MODEL env var"
+	@echo "  make run        Run oxide-rs with MODEL env var"
 	@echo "  make dev        Build in dev mode (faster compile)"
 	@echo "  make clean      Remove build artifacts"
 	@echo "  make install    Install to ~/.local/bin"
@@ -21,7 +21,7 @@ build:
 	cargo build --release
 
 run: build
-	./target/release/oxide --model $(MODEL)
+	./target/release/oxide-rs --model $(MODEL)
 
 dev:
 	cargo build
@@ -32,8 +32,8 @@ clean:
 
 install: build
 	@mkdir -p $(HOME)/.local/bin
-	cp ./target/release/oxide $(HOME)/.local/bin/
-	@echo "Installed to ~/.local/bin/oxide"
+	cp ./target/release/oxide-rs $(HOME)/.local/bin/
+	@echo "Installed to ~/.local/bin/oxide-rs"
 
 fmt:
 	cargo fmt

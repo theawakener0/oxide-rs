@@ -1,3 +1,3 @@
 pub mod generator;
 
-pub use generator::{Generator, StreamEvent};
+pub use generator::{ChatTemplate, Generator, Message, StreamEvent};

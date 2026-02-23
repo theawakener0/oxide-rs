@@ -1,9 +1,12 @@
 [package]
-name = "oxide"
+name = "oxide-rs"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "AI Inference CLI in Rust - llama.cpp style"
+description = "AI Inference library and CLI in Rust - llama.cpp style"
+repository = "https://github.com/yourusername/oxide"
+keywords = ["ai", "llm", "inference", "gguf", "candle"]
+categories = ["ai", "command-line-utilities"]
 
 [dependencies]
 candle-core = { git = "https://github.com/huggingface/candle.git", rev = "261f727f" }
