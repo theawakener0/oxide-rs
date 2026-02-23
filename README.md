@@ -16,6 +16,8 @@
 - **Interactive REPL** — Full conversation mode with session history
 - **One-Shot Mode** — Non-interactive generation for scripting/pipelines
 - **Beautiful CLI** — Animated loading, syntax-highlighted output, Rust-themed
+- **Smart Defaults** — Default system prompt reduces hallucinations, temperature tuned for accuracy
+- **Model Warmup** — Pre-compiles compute kernels on startup for faster first-token generation
 
 ## Installation
 
@@ -63,7 +65,7 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 ## Quick Start
 
 ```bash
-# Interactive chat mode
+# Interactive chat mode (uses default helpful system prompt)
 ./target/release/oxide --model ~/Models/your-model-Q4_K_M.gguf
 
 # With custom system prompt
@@ -86,9 +88,9 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 |------|---------|-------------|
 | `-m, --model` | *required* | Path to GGUF model file |
 | `-t, --tokenizer` | *auto* | Path to tokenizer.json (extracted from GGUF if omitted) |
-| `-s, --system` | *none* | System prompt for the model |
+| `-s, --system` | *auto* | System prompt (defaults to helpful assistant prompt) |
 | `--max-tokens` | `512` | Maximum tokens to generate |
-| `--temperature` | `0.7` | Sampling temperature (0.0 = greedy/argmax) |
+| `--temperature` | `0.3` | Sampling temperature (0.0 = greedy/argmax) |
 | `--top-k` | *none* | Top-k sampling threshold |
 | `--top-p` | *none* | Nucleus sampling threshold |
 | `--repeat-penalty` | `1.1` | Penalty for repeated tokens |
@@ -298,6 +300,8 @@ make clean
 - **Quantized models** — Q4_K_M provides good quality/speed tradeoff; other quantizations supported
 - **Streaming decode** — Tokens displayed as generated for responsive UX
 - **Context caching** — Efficient multi-turn conversations with token history management
+- **Model warmup** — Pre-compiles compute kernels on startup for faster first-token generation
+- **Smart defaults** — Temperature 0.3 for factual accuracy, default system prompt reduces hallucinations
 
 ## Roadmap
 
