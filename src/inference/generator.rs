@@ -113,6 +113,21 @@ impl Generator {
         self.token_history.clear();
     }
 
+    pub fn warmup(&mut self, num_warmup_tokens: usize) -> Result<()> {
+        tracing::info!("Warming up model with {} tokens...", num_warmup_tokens);
+
+        let warmup_tokens = vec![0u32; num_warmup_tokens.min(512)];
+
+        for i in (0..warmup_tokens.len()).step_by(64) {
+            let end = (i + 64).min(warmup_tokens.len());
+            let batch = &warmup_tokens[i..end];
+            let _ = self.model.forward(batch, i)?;
+        }
+
+        tracing::info!("Model warmup complete");
+        Ok(())
+    }
+
     pub fn generate<F>(
         &mut self,
         prompt: &str,

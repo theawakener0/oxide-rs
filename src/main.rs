@@ -15,6 +15,8 @@ use cli::{
 };
 use inference::{Generator, StreamEvent};
 
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful, honest, and accurate AI assistant. If you don't know something, say so clearly. Do not make up information or hallucinate facts.";
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -31,7 +33,7 @@ struct Args {
     max_tokens: usize,
 
     /// Temperature for sampling (0.0 = greedy)
-    #[arg(long, default_value = "0.7")]
+    #[arg(long, default_value = "0.3")]
     temperature: f64,
 
     /// Top-p sampling threshold
@@ -89,9 +91,16 @@ fn main() -> Result<()> {
         args.top_p,
         args.top_k,
         args.seed,
-        args.system.clone(),
+        args.system
+            .clone()
+            .or_else(|| Some(DEFAULT_SYSTEM_PROMPT.to_string())),
     ) {
-        Ok(g) => g,
+        Ok(mut g) => {
+            if let Err(e) = g.warmup(128) {
+                tracing::warn!("Model warmup failed: {}", e);
+            }
+            g
+        }
         Err(e) => {
             loader.finish_with_error(&format!("Failed: {}", e));
             return Err(e);
