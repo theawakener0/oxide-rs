@@ -16,6 +16,7 @@ pub struct GgufMetadata {
     pub vocab_size: usize,
     pub context_length: usize,
     pub file_size: u64,
+    pub chat_template: Option<String>,
 }
 
 pub enum ModelInner {
@@ -112,6 +113,10 @@ impl Model {
         let get_optional =
             |key_suffix: &str, default: usize| -> usize { find_key(key_suffix).unwrap_or(default) };
 
+        let chat_template = md
+            .get("tokenizer.chat_template")
+            .and_then(|v| v.to_string().ok().map(|s| s.clone()));
+
         Ok(GgufMetadata {
             name: model_name,
             architecture: arch.clone(),
@@ -120,6 +125,7 @@ impl Model {
             vocab_size: get_required("vocab_size")?,
             context_length: get_optional("context_length", 4096),
             file_size,
+            chat_template,
         })
     }
 

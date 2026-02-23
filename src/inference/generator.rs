@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::utils::apply_repeat_penalty;
+use minijinja::{context, Environment};
 
 use crate::model::{GgufMetadata, Model, TokenizerWrapper};
 
@@ -11,80 +12,36 @@ pub enum StreamEvent {
     Done,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
 pub struct ChatTemplate {
-    pub user_prefix: String,
-    pub user_suffix: String,
-    pub assistant_prefix: String,
-    pub system_prefix: Option<String>,
+    template_str: Option<String>,
 }
 
 impl ChatTemplate {
-    pub fn from_architecture(_arch: &str, model_name: &str) -> Self {
-        let lower = model_name.to_lowercase();
-
-        if lower.contains("smollm") {
-            Self {
-                user_prefix: "<|im_start|>user\n".to_string(),
-                user_suffix: "<|im_end|>\n".to_string(),
-                assistant_prefix: "<|im_start|>assistant\n".to_string(),
-                system_prefix: Some(
-                    "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n".to_string(),
-                ),
-            }
-        } else if lower.contains("lfm") {
-            Self {
-                user_prefix: "<|im_start|>user\n".to_string(),
-                user_suffix: "<|im_end|>\n".to_string(),
-                assistant_prefix: "<|im_start|>assistant\n".to_string(),
-                system_prefix: None,
-            }
-        } else if lower.contains("gemma") {
-            Self {
-                user_prefix: "<start_of_turn>user\n".to_string(),
-                user_suffix: "<end_of_turn>\n".to_string(),
-                assistant_prefix: "<start_of_turn>model\n".to_string(),
-                system_prefix: None,
-            }
-        } else if lower.contains("mistral") || lower.contains("zephyr") {
-            Self {
-                user_prefix: "[INST] ".to_string(),
-                user_suffix: " [/INST]".to_string(),
-                assistant_prefix: "".to_string(),
-                system_prefix: None,
-            }
-        } else if lower.contains("phi") {
-            Self {
-                user_prefix: "user\n".to_string(),
-                user_suffix: "<|end|>\n".to_string(),
-                assistant_prefix: "assistant\n".to_string(),
-                system_prefix: None,
-            }
-        } else {
-            Self {
-                user_prefix: "user\n".to_string(),
-                user_suffix: "\n".to_string(),
-                assistant_prefix: "assistant\n".to_string(),
-                system_prefix: None,
-            }
-        }
+    pub fn new(template: Option<String>) -> Result<Self> {
+        Ok(Self {
+            template_str: template,
+        })
     }
 
-    pub fn apply(&self, prompt: &str, include_response_start: bool) -> String {
-        let mut result = String::new();
+    pub fn apply(&self, messages: &[Message]) -> Result<String> {
+        let template = match &self.template_str {
+            Some(t) => t,
+            None => {
+                anyhow::bail!("GGUF file has no chat_template. Use a model with embedded template.")
+            }
+        };
 
-        if let Some(sys) = &self.system_prefix {
-            result.push_str(sys);
-        }
-
-        result.push_str(&self.user_prefix);
-        result.push_str(prompt);
-        result.push_str(&self.user_suffix);
-
-        if include_response_start {
-            result.push_str(&self.assistant_prefix);
-        }
-
-        result
+        let mut env = Environment::new();
+        env.add_template("chat", template)?;
+        let tmpl = env.get_template("chat")?;
+        let rendered = tmpl.render(context! { messages => messages })?;
+        Ok(rendered)
     }
 }
 
@@ -92,9 +49,11 @@ pub struct Generator {
     model: Model,
     tokenizer: TokenizerWrapper,
     logits_processor: LogitsProcessor,
-    history: Vec<u32>,
     template: ChatTemplate,
     metadata: GgufMetadata,
+    messages: Vec<Message>,
+    system_prompt: Option<String>,
+    token_history: Vec<u32>,
 }
 
 impl Generator {
@@ -105,13 +64,13 @@ impl Generator {
         top_p: Option<f64>,
         top_k: Option<usize>,
         seed: u64,
-        _max_history: usize,
+        system_prompt: Option<String>,
     ) -> Result<Self> {
         tracing::info!("Loading model from: {:?}", model_path);
 
         let model = Model::load(model_path)?;
         let metadata = model.metadata().clone();
-        let template = ChatTemplate::from_architecture(&metadata.architecture, &metadata.name);
+        let template = ChatTemplate::new(metadata.chat_template.clone())?;
 
         let tokenizer = if let Some(path) = tokenizer_path {
             TokenizerWrapper::from_file(path)?
@@ -137,14 +96,21 @@ impl Generator {
             model,
             tokenizer,
             logits_processor,
-            history: Vec::new(),
             template,
             metadata,
+            messages: Vec::new(),
+            system_prompt,
+            token_history: Vec::new(),
         })
     }
 
     pub fn metadata(&self) -> &GgufMetadata {
         &self.metadata
+    }
+
+    pub fn clear_history(&mut self) {
+        self.messages.clear();
+        self.token_history.clear();
     }
 
     pub fn generate<F>(
@@ -158,21 +124,35 @@ impl Generator {
     where
         F: FnMut(StreamEvent),
     {
-        let prompt_text = self.template.apply(prompt, true);
+        self.messages.push(Message {
+            role: "user".into(),
+            content: prompt.into(),
+        });
+
+        let mut all_messages = Vec::new();
+        if let Some(ref sys) = self.system_prompt {
+            all_messages.push(Message {
+                role: "system".into(),
+                content: sys.clone(),
+            });
+        }
+        all_messages.extend(self.messages.clone());
+
+        let prompt_text = self.template.apply(&all_messages)?;
         let prompt_tokens = self.tokenizer.encode(&prompt_text)?;
 
-        let total_len = self.history.len() + prompt_tokens.len() + max_tokens;
+        let total_len = self.token_history.len() + prompt_tokens.len() + max_tokens;
         if total_len > self.metadata.context_length {
             let excess = total_len - self.metadata.context_length;
-            if excess < self.history.len() {
-                self.history.drain(0..excess);
+            if excess < self.token_history.len() {
+                self.token_history.drain(0..excess);
             } else {
-                self.history.clear();
+                self.token_history.clear();
             }
         }
 
         let mut all_tokens = Vec::new();
-        all_tokens.extend_from_slice(&self.history);
+        all_tokens.extend_from_slice(&self.token_history);
         all_tokens.extend_from_slice(&prompt_tokens);
 
         let eos_token = self.tokenizer.eos_token_id();
@@ -234,8 +214,8 @@ impl Generator {
         self.tokenizer.clear_cache();
 
         let response_tokens: Vec<u32> =
-            all_tokens[self.history.len() + prompt_tokens.len()..].to_vec();
-        self.history = all_tokens;
+            all_tokens[self.token_history.len() + prompt_tokens.len()..].to_vec();
+        self.token_history = all_tokens;
 
         let dt = gen_start.elapsed();
         let tokens_per_sec = generated as f64 / dt.as_secs_f64();
@@ -249,6 +229,12 @@ impl Generator {
         callback(StreamEvent::Done);
 
         let response = self.tokenizer.decode(&response_tokens)?;
+
+        self.messages.push(Message {
+            role: "assistant".into(),
+            content: response.clone(),
+        });
+
         Ok(response)
     }
 }

@@ -10,8 +10,8 @@ use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use cli::{
-    print_banner, print_divider, print_model_info, print_welcome, History, ModelLoader,
-    PromptDisplay, StreamOutput,
+    print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
+    StreamOutput,
 };
 use inference::{Generator, StreamEvent};
 
@@ -54,9 +54,9 @@ struct Args {
     #[arg(long, default_value = "299792458")]
     seed: u64,
 
-    /// Maximum conversation history in tokens
-    #[arg(long, default_value = "2048")]
-    max_history: usize,
+    /// System prompt for the model
+    #[arg(short, long)]
+    system: Option<String>,
 
     /// Prompt to use (if not using interactive mode)
     #[arg(short, long)]
@@ -65,10 +65,6 @@ struct Args {
     /// Run in non-interactive mode (generate and exit)
     #[arg(short, long)]
     once: bool,
-
-    /// Clear conversation history
-    #[arg(long)]
-    clear_history: bool,
 }
 
 fn main() -> Result<()> {
@@ -93,7 +89,7 @@ fn main() -> Result<()> {
         args.top_p,
         args.top_k,
         args.seed,
-        args.max_history,
+        args.system.clone(),
     ) {
         Ok(g) => g,
         Err(e) => {
@@ -112,12 +108,6 @@ fn main() -> Result<()> {
         metadata.n_layer,
         metadata.n_embd,
     );
-
-    if args.clear_history {
-        let mut history = History::load();
-        history.clear();
-        println!("  History cleared.");
-    }
 
     if args.once {
         let prompt = args
@@ -156,7 +146,6 @@ fn main() -> Result<()> {
 }
 
 fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
-    let mut history = History::load();
     let mut generator = generator;
     let mut prompt_display = PromptDisplay::new();
 
@@ -177,7 +166,7 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
         }
 
         if prompt == "/clear" {
-            history.clear();
+            generator.clear_history();
             println!("  History cleared.\n");
             continue;
         }
@@ -191,8 +180,6 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
         }
 
         let mut stream = StreamOutput::new();
-
-        history.add("user", &prompt);
 
         generator.generate(
             &prompt,
@@ -209,11 +196,9 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
             },
         )?;
 
-        history.save();
         print_divider();
     }
 
-    history.save();
     Ok(())
 }
 

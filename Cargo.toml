@@ -12,14 +12,13 @@ candle-transformers = { git = "https://github.com/huggingface/candle.git", rev =
 tokenizers = "0.19"
 shimmytok = "0.7"
 crossterm = "0.28"
+minijinja = "2.4"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-crossbeam-channel = "0.5"
-dirs = "5.0"
 
 [profile.release]
 opt-level = 3

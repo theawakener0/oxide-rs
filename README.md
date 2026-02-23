@@ -9,20 +9,20 @@
 
 - **GGUF Model Support** — Load quantized models in GGUF format
 - **Full Tokenizer Compatibility** — Supports all llama.cpp tokenizer types via [shimmytok](https://crates.io/crates/shimmytok) (SPM, BPE, WPM, UGM, RWKV)
+- **Automatic Chat Templates** — Uses Jinja templates embedded in GGUF files via [minijinja](https://crates.io/crates/minijinja)
 - **Streaming Output** — Real-time token generation with tokens-per-second metrics
 - **Multiple Sampling Strategies** — Temperature, top-k, top-p, and argmax sampling
 - **Repeat Penalty** — Prevents repetitive output with configurable penalty window
-- **Chat Templates** — Automatic prompt formatting for popular model families
-- **Interactive REPL** — Full conversation mode with history persistence
+- **Interactive REPL** — Full conversation mode with session history
 - **One-Shot Mode** — Non-interactive generation for scripting/pipelines
-- **Beautiful CLI** — Animated loading, syntax-highlighted output, terminal theming
+- **Beautiful CLI** — Animated loading, syntax-highlighted output, Rust-themed
 
 ## Installation
 
 ### Prerequisites
 
 - Rust 1.70+ (2021 edition)
-- A GGUF quantized model file
+- A GGUF quantized model file with embedded chat template
 
 ### Build from Source
 
@@ -66,6 +66,9 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 # Interactive chat mode
 ./target/release/oxide --model ~/Models/your-model-Q4_K_M.gguf
 
+# With custom system prompt
+./target/release/oxide --model ~/Models/model.gguf --system "You are a Rust expert."
+
 # One-shot generation
 ./target/release/oxide --model ~/Models/model.gguf --once --prompt "Write a Rust function to reverse a string"
 
@@ -83,6 +86,7 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 |------|---------|-------------|
 | `-m, --model` | *required* | Path to GGUF model file |
 | `-t, --tokenizer` | *auto* | Path to tokenizer.json (extracted from GGUF if omitted) |
+| `-s, --system` | *none* | System prompt for the model |
 | `--max-tokens` | `512` | Maximum tokens to generate |
 | `--temperature` | `0.7` | Sampling temperature (0.0 = greedy/argmax) |
 | `--top-k` | *none* | Top-k sampling threshold |
@@ -90,26 +94,70 @@ MODEL=~/Models/phi-3.Q4_K_M.gguf make run
 | `--repeat-penalty` | `1.1` | Penalty for repeated tokens |
 | `--repeat-last-n` | `64` | Context window for repeat penalty |
 | `--seed` | `299792458` | Random seed for reproducibility |
-| `--max-history` | `2048` | Maximum conversation history in tokens |
 | `-p, --prompt` | *none* | Input prompt (for one-shot mode) |
 | `-o, --once` | `false` | Run in non-interactive mode |
-| `--clear-history` | `false` | Clear saved conversation history |
 
 ## Interactive Commands
 
 | Command | Description |
 |---------|-------------|
-| `/clear` | Clear conversation history |
+| `/clear` | Clear conversation history for current session |
 | `/exit` or `/quit` | Exit the program |
 | `/help` | Show available commands |
+
+## Chat Templates
+
+Oxide automatically uses the chat template embedded in GGUF files:
+
+```mermaid
+graph LR
+    A[GGUF File] --> B[tokenizer.chat_template]
+    B --> C[minijinja]
+    C --> D[Rendered Prompt]
+```
+
+### How It Works
+
+1. **Extraction** — Reads `tokenizer.chat_template` from GGUF metadata
+2. **Rendering** — Uses [minijinja](https://crates.io/crates/minijinja) to render Jinja2 templates
+3. **Multi-turn** — Maintains conversation history within the session
+
+### Example Template (ChatML)
+
+```jinja2
+{% for message in messages %}
+<|im_start|>{{ message.role }}
+{{ message.content }}<|im_end|>
+{% endfor %}
+<|im_start|>assistant
+```
+
+### Supported Models
+
+Any GGUF model with an embedded `tokenizer.chat_template` will work automatically:
+
+| Model Family | Template Source |
+|--------------|-----------------|
+| LLaMA 3.x | Embedded in GGUF |
+| Mistral | Embedded in GGUF |
+| Qwen | Embedded in GGUF |
+| Gemma | Embedded in GGUF |
+| Phi-3 | Embedded in GGUF |
+| SmolLM | Embedded in GGUF |
+| LFM | Embedded in GGUF |
+
+> **Note**: If your GGUF file lacks a chat template, Oxide will error and ask you to use a model with an embedded template.
 
 ## Supported Models
 
 ### Model Architectures
 
-Oxide uses [Candle](https://github.com/huggingface/candle) for inference. 
+Oxide uses [Candle](https://github.com/huggingface/candle) for inference:
 
-> **Note**: Any GGUF model with LLaMA-compatible architecture should work. This includes most popular open-source models.
+- **LLaMA** — LLaMA 2, LLaMA 3, Mistral, Qwen, Phi, etc.
+- **LFM2** — Liquid Foundation Models
+
+> **Note**: Any GGUF model with LLaMA-compatible or LFM2 architecture should work.
 
 ### Tokenizer Support
 
@@ -122,21 +170,6 @@ Oxide uses [shimmytok](https://crates.io/crates/shimmytok) for tokenizer support
 | **WPM** | WordPiece Model (BERT style) |
 | **UGM** | Unigram Model |
 | **RWKV** | RWKV tokenizers |
-
-### Chat Templates
-
-Oxide automatically applies the correct chat template based on model name detection:
-
-| Model Family | Template Format | Notes |
-|--------------|-----------------|-------|
-| SmolLM | `<\|im_start\|>user\n...<\|im_end\|>` | Includes system prompt |
-| LFM | `<\|im_start\|>user\n...<\|im_end\|>` | ChatML-style |
-| Gemma | `<start_of_turn>user\n...<end_of_turn>` | Google's format |
-| Mistral / Zephyr | `[INST] ... [/INST]` | LLaMA-2 instruct style |
-| Phi | `user\n...<\|end\|>\nassistant\n` | Microsoft Phi format |
-| Default | `user\n...\nassistant\n` | Fallback for unknown models |
-
-> **Fallback**: Models not matching known patterns use a simple `user/assistant` format.
 
 ## Architecture
 
@@ -168,6 +201,7 @@ graph TB
     subgraph Core["Core Dependencies"]
         candle[Candle Transformers]
         shimmytok[shimmytok]
+        minijinja[minijinja]
     end
 
     args --> generator
@@ -178,6 +212,7 @@ graph TB
     generator --> callback
     
     callback --> stream
+    template --> minijinja
     
     model --> candle
     tokenizer --> shimmytok
@@ -194,13 +229,16 @@ sequenceDiagram
     participant User
     participant CLI
     participant Generator
+    participant Template
     participant Model
     participant Tokenizer
     participant Stream
 
     User->>CLI: Enter prompt
     CLI->>Generator: generate(prompt, config)
-    Generator->>Tokenizer: encode(prompt + template)
+    Generator->>Template: apply(messages)
+    Template-->>Generator: formatted prompt
+    Generator->>Tokenizer: encode(prompt)
     Tokenizer-->>Generator: tokens[]
     Generator->>Model: forward(tokens)
     Model-->>Generator: logits
@@ -247,10 +285,11 @@ make clean
 | `candle-nn` | Neural network layers |
 | `candle-transformers` | Pre-built model architectures (LLaMA, LFM2) |
 | `shimmytok` | GGUF tokenizer (100% llama.cpp compatible) |
+| `minijinja` | Jinja2 template engine for chat templates |
 | `clap` | CLI argument parsing with derive macros |
 | `crossterm` | Cross-platform terminal control |
 | `anyhow` | Ergonomic error handling |
-| `serde_json` | History serialization |
+| `serde` | Serialization for messages |
 | `tracing` | Structured logging |
 
 ## Performance
@@ -258,7 +297,7 @@ make clean
 - **CPU-only inference** — No GPU dependencies, portable binaries
 - **Quantized models** — Q4_K_M provides good quality/speed tradeoff; other quantizations supported
 - **Streaming decode** — Tokens displayed as generated for responsive UX
-- **Context caching** — Efficient multi-turn conversations with history management
+- **Context caching** — Efficient multi-turn conversations with token history management
 
 ## Roadmap
 
@@ -275,3 +314,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 - [Candle](https://github.com/huggingface/candle) — HuggingFace's minimalist ML framework for Rust
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) — Inspiration and GGUF format specification
 - [shimmytok](https://crates.io/crates/shimmytok) — Pure Rust GGUF tokenizer with llama.cpp compatibility
+- [minijinja](https://crates.io/crates/minijinja) — Minimal Jinja2 template engine for Rust
