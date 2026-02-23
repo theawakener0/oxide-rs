@@ -1,7 +1,7 @@
 [package]
 name = "oxide-rs"
 version = "0.1.0"
-edition = "2026"
+edition = "2024"
 license = "MIT"
 description = "AI Inference library and CLI in Rust - llama.cpp style"
 repository = "https://github.com/theawakener0/oxide"
