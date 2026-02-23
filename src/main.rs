@@ -80,11 +80,11 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     if let Some(threads) = args.threads {
-        std::env::set_var("RAYON_NUM_THREADS", threads.to_string());
+        unsafe { std::env::set_var("RAYON_NUM_THREADS", threads.to_string()) };
     } else {
         let num_cpus = num_cpus::get();
         let optimal_threads = num_cpus.saturating_sub(1).max(1);
-        std::env::set_var("RAYON_NUM_THREADS", optimal_threads.to_string());
+        unsafe { std::env::set_var("RAYON_NUM_THREADS", optimal_threads.to_string()) };
     }
 
     let configured_threads =
@@ -137,10 +137,10 @@ fn main() -> Result<()> {
         let mut prompt_display = PromptDisplay::new();
         prompt_display.show_user_input(&prompt);
 
-        let mut gen = generator;
+        let mut gen_output = generator;
         let mut stream = StreamOutput::new();
 
-        gen.generate(
+        gen_output.generate(
             &prompt,
             args.max_tokens,
             args.repeat_penalty,

@@ -1,12 +1,13 @@
 [package]
 name = "oxide-rs"
-version = "0.1.0"
-edition = "2024"
+version = "0.1.1"
+edition = "2021"
 license = "MIT"
 description = "AI Inference library and CLI in Rust - llama.cpp style"
-repository = "https://github.com/theawakener0/oxide"
+repository = "https://github.com/theawakener0/oxide-rs"
 keywords = ["llm", "inference", "gguf", "candle", "machine-learning"]
 categories = ["science", "command-line-utilities"]
+rust-version = "1.70"
 
 [dependencies]
 candle-core = "0.9"
