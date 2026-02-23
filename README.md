@@ -45,6 +45,21 @@ make install
 # Installs to ~/.local/bin/oxide
 ```
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL` | `~/Models/LFM2.5-1.2B-Instruct-Q4_K_M.gguf` | Path to GGUF model for `make run` |
+
+```bash
+# Set custom model path for make run
+export MODEL=~/Models/mistral-7b-v0.1.Q4_K_M.gguf
+make run
+
+# Or inline
+MODEL=~/Models/phi-3.Q4_K_M.gguf make run
+```
+
 ## Quick Start
 
 ```bash
@@ -208,7 +223,10 @@ sequenceDiagram
 # Development build (faster compile)
 make dev
 
-# Run with model
+# Run with model (uses MODEL env var)
+make run
+
+# Or override MODEL inline
 make run MODEL=~/path/to/model.gguf
 
 # Format code
