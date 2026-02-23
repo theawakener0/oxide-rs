@@ -130,15 +130,14 @@ pub fn print_banner() {
     execute!(
         stdout,
         SetForegroundColor(Theme::IRON_GRAY),
-        Print("  "),
+        Print("           "),
         ResetColor,
         SetForegroundColor(Theme::RUST_ORANGE),
         SetAttribute(Attribute::Bold),
         Print("v0.1.0"),
         ResetColor,
-        Print("  •  "),
         SetForegroundColor(Theme::IRON_GRAY),
-        Print("Press Ctrl+C to exit"),
+        Print(" • Ctrl+C to exit"),
         ResetColor,
         Print("\n\n")
     )

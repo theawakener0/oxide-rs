@@ -84,7 +84,7 @@ fn main() -> Result<()> {
 
     print_banner();
 
-    let loader = ModelLoader::new("Loading model...");
+    let loader = ModelLoader::new();
 
     let generator = match Generator::new(
         &args.model,
@@ -97,16 +97,13 @@ fn main() -> Result<()> {
     ) {
         Ok(g) => g,
         Err(e) => {
-            loader.finish_with_error(&format!("Failed to load model: {}", e));
+            loader.finish_with_error(&format!("Failed: {}", e));
             return Err(e);
         }
     };
 
     let metadata = generator.metadata().clone();
-    loader.finish(&format!(
-        "{} loaded ({} layers, {} dim)",
-        metadata.name, metadata.n_layer, metadata.n_embd
-    ));
+    loader.finish(&metadata.name);
 
     print_model_info(
         &metadata.name,

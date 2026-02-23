@@ -14,7 +14,18 @@ use crossterm::{
 
 use super::theme::Theme;
 
-const FERRIS_SPINNER: &[&str] = &["🦀   ", "🦀.  ", "🦀.. ", "🦀..."];
+const FERRIS_WALKING: &[&str] = &[
+    "🦀      ",
+    " 🦀     ",
+    "  🦀    ",
+    "   🦀   ",
+    "    🦀  ",
+    "     🦀 ",
+    "      🦀",
+    "     🦀 ",
+    "  🦀    ",
+    " 🦀     ",
+];
 
 pub struct ModelLoader {
     running: Arc<AtomicBool>,
@@ -22,9 +33,8 @@ pub struct ModelLoader {
 }
 
 impl ModelLoader {
-    pub fn new(message: &str) -> Self {
+    pub fn new() -> Self {
         let running = Arc::new(AtomicBool::new(true));
-        let msg = message.to_string();
 
         let handle = thread::spawn({
             let running = running.clone();
@@ -33,7 +43,7 @@ impl ModelLoader {
                 let mut i = 0usize;
 
                 while running.load(Ordering::Relaxed) {
-                    let ferris = FERRIS_SPINNER[i % FERRIS_SPINNER.len()];
+                    let ferris = FERRIS_WALKING[i % FERRIS_WALKING.len()];
 
                     execute!(
                         stdout,
@@ -41,16 +51,12 @@ impl ModelLoader {
                         Clear(ClearType::CurrentLine),
                         SetForegroundColor(Theme::RUST_ORANGE),
                         Print(ferris),
-                        ResetColor,
-                        Print(" "),
-                        SetForegroundColor(Theme::TEXT_PRIMARY),
-                        Print(&msg),
                         ResetColor
                     )
                     .ok();
 
                     stdout.flush().ok();
-                    thread::sleep(Duration::from_millis(150));
+                    thread::sleep(Duration::from_millis(100));
                     i = i.wrapping_add(1);
                 }
             }
@@ -62,7 +68,7 @@ impl ModelLoader {
         }
     }
 
-    pub fn finish(mut self, message: &str) {
+    pub fn finish(mut self, model_name: &str) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
             h.join().ok();
@@ -75,11 +81,10 @@ impl ModelLoader {
             Clear(ClearType::CurrentLine),
             SetForegroundColor(Theme::SUCCESS_GREEN),
             SetAttribute(Attribute::Bold),
-            Print("✓"),
+            Print("✓ "),
             ResetColor,
-            Print(" "),
             SetForegroundColor(Theme::TEXT_PRIMARY),
-            Print(message),
+            Print(model_name),
             ResetColor,
             Print("\n")
         )
@@ -99,15 +104,20 @@ impl ModelLoader {
             Clear(ClearType::CurrentLine),
             SetForegroundColor(Theme::ERROR_RED),
             SetAttribute(Attribute::Bold),
-            Print("✗"),
+            Print("✗ "),
             ResetColor,
-            Print(" "),
             SetForegroundColor(Theme::TEXT_PRIMARY),
             Print(message),
             ResetColor,
             Print("\n")
         )
         .ok();
+    }
+}
+
+impl Default for ModelLoader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
