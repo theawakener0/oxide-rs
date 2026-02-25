@@ -19,6 +19,7 @@ pub struct GgufMetadata {
     pub context_length: usize,
     pub file_size: u64,
     pub chat_template: Option<String>,
+    pub quantization: Option<String>,
 }
 
 pub enum ModelInner {
@@ -159,6 +160,19 @@ impl Model {
             .get("tokenizer.chat_template")
             .and_then(|v| v.to_string().ok().map(|s| s.clone()));
 
+        let quantization: Option<String> = md
+            .get("general.quantization")
+            .and_then(|v| v.to_string().ok().map(|s| s.to_string()))
+            .or_else(|| {
+                filename
+                    .split('.')
+                    .last()
+                    .map(|s| s.to_string())
+                    .filter(|s| {
+                        s.len() > 2 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    })
+            });
+
         Ok(GgufMetadata {
             name: model_name,
             architecture: arch.clone(),
@@ -168,6 +182,7 @@ impl Model {
             context_length: get_optional("context_length", 4096),
             file_size,
             chat_template,
+            quantization,
         })
     }
 

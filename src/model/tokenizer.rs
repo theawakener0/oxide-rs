@@ -3,6 +3,8 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use candle_core::quantized::gguf_file;
+use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use shimmytok::Tokenizer as ShimmyTokenizer;
 
@@ -31,7 +33,27 @@ fn get_cache_path(model_path: &PathBuf) -> Result<PathBuf> {
     let cache_dir = PathBuf::from(home).join(CACHE_DIR);
     fs::create_dir_all(&cache_dir)?;
 
-    Ok(cache_dir.join(format!("{}.tokenizer", hash)))
+    Ok(cache_dir.join(format!("{}.tokenizer_cache", hash)))
+}
+
+fn extract_tokenizer_json(path: &PathBuf) -> Result<Option<String>> {
+    let file = File::open(path)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let mut cursor = std::io::Cursor::new(&mmap);
+
+    let content = gguf_file::Content::read(&mut cursor)
+        .map_err(|e| anyhow::anyhow!("Failed to read GGUF: {}", e))?;
+
+    let md = &content.metadata;
+
+    if let Some(tokenizer_json) = md.get("tokenizer.json.json") {
+        if let Ok(s) = tokenizer_json.to_string() {
+            tracing::debug!("Found embedded tokenizer.json in GGUF");
+            return Ok(Some(s.clone()));
+        }
+    }
+
+    Ok(None)
 }
 
 impl TokenizerWrapper {
@@ -48,6 +70,16 @@ impl TokenizerWrapper {
                 .or_else(|_| ShimmyTokenizer::from_gguf_file(path))?
         } else {
             tracing::info!("Loading tokenizer from GGUF (first time)...");
+
+            if let Ok(Some(tokenizer_json)) = extract_tokenizer_json(path) {
+                let json_cache_path = cache_path.with_extension("tokenizer_json");
+                if let Err(e) = fs::write(&json_cache_path, &tokenizer_json) {
+                    tracing::warn!("Failed to cache tokenizer JSON: {}", e);
+                } else {
+                    tracing::info!("Tokenizer JSON cached to {:?}", json_cache_path);
+                }
+            }
+
             let tokenizer = ShimmyTokenizer::from_gguf_file(path)
                 .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
 

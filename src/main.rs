@@ -1,13 +1,14 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
     StreamOutput,
 };
 use oxide_rs::inference::{Generator, StreamEvent};
+use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful, honest, and accurate AI assistant. If you don't know something, say so clearly. Do not make up information or hallucinate facts.";
@@ -79,17 +80,16 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    if let Some(threads) = args.threads {
-        unsafe { std::env::set_var("RAYON_NUM_THREADS", threads.to_string()) };
-    } else {
-        let num_cpus = num_cpus::get();
-        let optimal_threads = num_cpus.saturating_sub(1).max(1);
-        unsafe { std::env::set_var("RAYON_NUM_THREADS", optimal_threads.to_string()) };
-    }
+    let num_threads = args
+        .threads
+        .unwrap_or_else(|| num_cpus::get().saturating_sub(1).max(1));
 
-    let configured_threads =
-        std::env::var("RAYON_NUM_THREADS").unwrap_or_else(|_| "auto".to_string());
-    tracing::info!("Using {} threads for inference", configured_threads);
+    ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build_global()
+        .context("Failed to build thread pool")?;
+
+    tracing::info!("Using {} threads for inference", num_threads);
 
     print_banner();
 
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     print_model_info(
         &metadata.name,
         &format_size(metadata.file_size),
-        "Q4_K_M",
+        metadata.quantization.as_deref().unwrap_or("Unknown"),
         metadata.n_layer,
         metadata.n_embd,
     );
