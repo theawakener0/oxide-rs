@@ -1,5 +1,4 @@
 use std::fs::{self, File};
-use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -21,7 +20,8 @@ fn get_cache_path(model_path: &PathBuf) -> Result<PathBuf> {
 
     let mut file = File::open(model_path)?;
     let mut header = vec![0u8; 65536];
-    file.read(&mut header)?;
+    use std::io::Read;
+    file.read_exact(&mut header)?;
     hasher.update(&header);
 
     let file_size = file.metadata()?.len();

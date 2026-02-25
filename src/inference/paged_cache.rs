@@ -9,30 +9,30 @@ mod integration_notes {
     //!
     //! To fully integrate PagedAttention with the Generator:
     //!
-    //! 1. **Current State**: PagedKvCache infrastructure exists but Model::forward()
-    //!    does not utilize it. The quantized LLM models in candle-transformers
-    //!    internally manage KV cache during autoregressive generation.
+    //! **Current State**: PagedKvCache infrastructure exists but Model::forward()
+    //! does not utilize it. The quantized LLM models in candle-transformers
+    //! internally manage KV cache during autoregressive generation.
     //!
-    //! 2. **Integration Options**:
+    //! **Integration Options**:
     //!
-    //!    a) **Use non-quantized models**: Some candle model variants support
-    //!       external KV cache. This requires loading fp16/fp32 weights.
+    //! - Use non-quantized models: Some candle model variants support external KV
+    //!   cache. This requires loading fp16/fp32 weights.
     //!
-    //!    b) **Modify forward signature**: Change Model::forward() to accept
-    //!       optional KV cache reference. Requires upstream changes to
-    //!       candle-transformers quantized_llama/quantized_lfm2.
+    //! - Modify forward signature: Change Model::forward() to accept optional KV
+    //!   cache reference. Requires upstream changes to candle-transformers.
     //!
-    //!    c) **Alternative architecture**: Use a custom model loader that
-    //!       provides external cache support.
+    //! - Alternative architecture: Use a custom model loader that provides
+    //!   external cache support.
     //!
-    //! 3. **Benefits**:
-    //!    - Reduce memory allocation for long contexts
-    //!    - Enable prompt caching across conversations
-    //!    - Better memory efficiency for batched inference
+    //! **Benefits**:
     //!
-    //! 4. **Current Usage**: The infrastructure is in place. kv_cache field
-    //!    is initialized in Generator::new() and tracks stats via
-    //!    kv_cache_stats() and clear_kv_cache() methods.
+    //! - Reduce memory allocation for long contexts
+    //! - Enable prompt caching across conversations
+    //! - Better memory efficiency for batched inference
+    //!
+    //! **Current Usage**: The infrastructure is in place. kv_cache field is
+    //! initialized in Generator::new() and tracks stats via kv_cache_stats() and
+    //! clear_kv_cache() methods.
     pub const _INTEGRATION_NOTES: &str = "See module documentation";
 }
 

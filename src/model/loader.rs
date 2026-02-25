@@ -123,14 +123,14 @@ impl Model {
         let arch: String = match md.get("general.architecture") {
             Some(v) => v
                 .to_string()
-                .map(|s| s.clone())
+                .cloned()
                 .unwrap_or_else(|_| "llama".to_string()),
             None => "llama".to_string(),
         };
 
         let model_name: String = md
             .get("general.name")
-            .and_then(|v| v.to_string().ok().map(|s| s.clone()))
+            .and_then(|v| v.to_string().ok().cloned())
             .unwrap_or_else(|| filename.to_string());
 
         let find_key = |key_suffix: &str| -> Option<usize> {
@@ -158,7 +158,7 @@ impl Model {
 
         let chat_template = md
             .get("tokenizer.chat_template")
-            .and_then(|v| v.to_string().ok().map(|s| s.clone()));
+            .and_then(|v| v.to_string().ok().cloned());
 
         let quantization: Option<String> = md
             .get("general.quantization")
@@ -166,7 +166,7 @@ impl Model {
             .or_else(|| {
                 filename
                     .split('.')
-                    .last()
+                    .next_back()
                     .map(|s| s.to_string())
                     .filter(|s| {
                         s.len() > 2 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')

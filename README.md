@@ -9,20 +9,24 @@
 
 - **GGUF Model Support** — Load quantized models in GGUF format
 - **Full Tokenizer Compatibility** — Supports all llama.cpp tokenizer types via [shimmytok](https://crates.io/crates/shimmytok) (SPM, BPE, WPM, UGM, RWKV)
+- **Tokenizer JSON Extraction** — Extracts and caches tokenizer.json from GGUF when available
 - **Automatic Chat Templates** — Uses Jinja templates embedded in GGUF files via [minijinja](https://crates.io/crates/minijinja)
 - **Streaming Output** — Real-time token generation with tokens-per-second metrics
 - **Multiple Sampling Strategies** — Temperature, top-k, top-p, and argmax sampling
 - **Repeat Penalty** — Prevents repetitive output with configurable penalty window
 - **Interactive REPL** — Full conversation mode with session history
 - **One-Shot Mode** — Non-interactive generation for scripting/pipelines
+- **Batch Processing** — Parallel tokenization for multiple prompts
+- **PagedAttention Ready** — Infrastructure for KV cache management (future integration)
 - **Beautiful CLI** — Animated loading, syntax-highlighted output, Rust-themed
 - **Smart Defaults** — Default system prompt reduces hallucinations, temperature tuned for accuracy
 - **Model Warmup** — Pre-compiles compute kernels on startup for faster first-token generation
 - **Memory-Mapped Loading** — OS-managed paging for instant load times and lower memory usage
-- **Auto Thread Tuning** — Automatically detects optimal thread count for your CPU
+- **Safe Thread Configuration** — Uses rayon ThreadPoolBuilder instead of unsafe env vars
 - **Pre-allocated Buffers** — Zero-copy runtime allocations for smooth generation
 - **Tokenizer Caching** — Caches tokenizer to disk for faster subsequent loads
 - **Page Prefetching** — Preloads hot model pages into memory for faster first-token
+- **Quantization Display** — Shows actual quantization from GGUF metadata or filename
 
 ## Installation
 
@@ -261,6 +265,7 @@ graph TB
 
     subgraph Inference["Inference Layer"]
         generator[Generator]
+        kv_cache[PagedKvCache]
         template[Chat Template]
         sampler[Logits Processor]
         callback[StreamEvent Callback]
@@ -269,20 +274,24 @@ graph TB
     subgraph Model["Model Layer"]
         model[Model Weights]
         tokenizer[Tokenizer Wrapper]
+        metadata[GGUF Metadata]
     end
 
     subgraph Core["Core Dependencies"]
         candle[Candle Transformers]
         shimmytok[shimmytok]
+        rayon[Rayon]
         minijinja[minijinja]
     end
 
     args --> generator
     generator --> template
     generator --> sampler
+    generator --> kv_cache
     generator --> model
     generator --> tokenizer
     generator --> callback
+    generator --> metadata
     
     callback --> stream
     template --> minijinja
@@ -358,6 +367,7 @@ make clean
 | `candle-nn` | Neural network layers |
 | `candle-transformers` | Pre-built model architectures (LLaMA, LFM2) |
 | `shimmytok` | GGUF tokenizer (100% llama.cpp compatible) |
+| `rayon` | Parallel iteration and thread pool management |
 | `minijinja` | Jinja2 template engine for chat templates |
 | `clap` | CLI argument parsing with derive macros |
 | `crossterm` | Cross-platform terminal control |
@@ -370,12 +380,16 @@ make clean
 - **CPU-only inference** — No GPU dependencies, portable binaries
 - **Quantized models** — Q4_K_M provides good quality/speed tradeoff; other quantizations supported
 - **Streaming decode** — Tokens displayed as generated for responsive UX
+- **Parallel batch tokenization** — Multiple prompts tokenized concurrently
+- **Memory-efficient generation** — Reduced allocations per prompt
 - **Context caching** — Efficient multi-turn conversations with token history management
 - **Model warmup** — Pre-compiles compute kernels on startup for faster first-token generation
 - **Smart defaults** — Temperature 0.3 for factual accuracy, default system prompt reduces hallucinations
+- **Safe threading** — Rayon ThreadPoolBuilder for predictable thread management
 
 ## Roadmap
 
+- [ ] PagedAttention integration (full KV cache support)
 - [ ] Multi-modal support
 - [ ] OpenAI-compatible API server
 - [ ] Model download/management
