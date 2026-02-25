@@ -134,7 +134,7 @@ pub fn print_banner() {
         ResetColor,
         SetForegroundColor(Theme::RUST_ORANGE),
         SetAttribute(Attribute::Bold),
-        Print("v0.1.0"),
+        Print("v0.1.1"),
         ResetColor,
         SetForegroundColor(Theme::IRON_GRAY),
         Print(" • Ctrl+C to exit"),
