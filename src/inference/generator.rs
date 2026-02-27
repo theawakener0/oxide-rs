@@ -11,6 +11,7 @@ use crate::model::{GgufMetadata, Model, TokenizerWrapper};
 
 pub enum StreamEvent {
     Token(String),
+    PrefillStatus(usize),
     Done,
 }
 
@@ -133,6 +134,27 @@ impl Generator {
 
     pub fn metadata(&self) -> &GgufMetadata {
         &self.metadata
+    }
+
+    pub fn context_used(&self) -> usize {
+        self.token_history.len()
+    }
+
+    pub fn context_limit(&self) -> usize {
+        self.metadata.context_length
+    }
+
+    pub fn context_percentage(&self) -> f32 {
+        let limit = self.context_limit();
+        if limit == 0 {
+            0.0
+        } else {
+            (self.context_used() as f32 / limit as f32) * 100.0
+        }
+    }
+
+    pub fn context_warning(&self) -> bool {
+        self.context_percentage() >= 80.0
     }
 
     pub fn clear_history(&mut self) {
@@ -264,6 +286,8 @@ impl Generator {
         let eos_token = self.tokenizer.eos_token_id();
 
         let prompt_start = std::time::Instant::now();
+
+        callback(StreamEvent::PrefillStatus(prompt_tokens.len()));
 
         let logits = self.model.forward(prompt_tokens, 0)?;
         let logits = logits.squeeze(0)?;

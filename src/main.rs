@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
-    StreamOutput,
+    StreamOutput, ThinkingSpinner,
 };
 use oxide_rs::inference::{Generator, StreamEvent};
 use rayon::ThreadPoolBuilder;
@@ -127,6 +127,7 @@ fn main() -> Result<()> {
         metadata.quantization.as_deref().unwrap_or("Unknown"),
         metadata.n_layer,
         metadata.n_embd,
+        metadata.context_length,
     );
 
     if args.once {
@@ -139,6 +140,9 @@ fn main() -> Result<()> {
 
         let mut gen_output = generator;
         let mut stream = StreamOutput::new();
+        let mut thinking_spinner: Option<ThinkingSpinner> = None;
+        let context_limit = gen_output.context_limit();
+        let context_used = gen_output.context_used();
 
         gen_output.generate(
             &prompt,
@@ -146,7 +150,16 @@ fn main() -> Result<()> {
             args.repeat_penalty,
             args.repeat_last_n,
             |event| match event {
+                StreamEvent::PrefillStatus(_) => {
+                    if thinking_spinner.is_none() {
+                        thinking_spinner = Some(ThinkingSpinner::new());
+                    }
+                }
                 StreamEvent::Token(t) => {
+                    if let Some(spinner) = thinking_spinner.take() {
+                        spinner.stop();
+                    }
+                    stream.set_context(context_used, context_limit);
                     stream.print_token(&t);
                 }
                 StreamEvent::Done => {
@@ -193,13 +206,47 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
 
         if prompt == "/help" {
             println!("  Commands:");
-            println!("    /clear  - Clear conversation history");
-            println!("    /exit   - Exit the program");
-            println!("    /help   - Show this help\n");
+            println!("    /clear   - Clear conversation history");
+            println!("    /context - Show context usage");
+            println!("    /stats   - Show model info and settings");
+            println!("    /exit    - Exit the program");
+            println!("    /help    - Show this help\n");
+            continue;
+        }
+
+        if prompt == "/context" {
+            let used = generator.context_used();
+            let limit = generator.context_limit();
+            let percentage = generator.context_percentage();
+            println!(
+                "  Context: {} / {} tokens ({:.1}%)\n",
+                used, limit, percentage
+            );
+            continue;
+        }
+
+        if prompt == "/stats" {
+            let meta = generator.metadata();
+            println!("  Model:     {}", meta.name);
+            println!(
+                "  Quant:     {}",
+                meta.quantization.as_deref().unwrap_or("Unknown")
+            );
+            println!("  Context:   {} tokens", meta.context_length);
+            println!("  Layers:    {}", meta.n_layer);
+            println!("  Embedding: {}", meta.n_embd);
+            println!("  Vocab:     {}", meta.vocab_size);
+            println!("  Temp:      {}", args.temperature);
+            println!("  Max Tok:   {}", args.max_tokens);
+            println!("  Seed:      {}", args.seed);
+            println!();
             continue;
         }
 
         let mut stream = StreamOutput::new();
+        let mut thinking_spinner: Option<ThinkingSpinner> = None;
+        let context_limit = generator.context_limit();
+        let context_used = generator.context_used();
 
         generator.generate(
             &prompt,
@@ -207,7 +254,16 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
             args.repeat_penalty,
             args.repeat_last_n,
             |event| match event {
+                StreamEvent::PrefillStatus(_) => {
+                    if thinking_spinner.is_none() {
+                        thinking_spinner = Some(ThinkingSpinner::new());
+                    }
+                }
                 StreamEvent::Token(t) => {
+                    if let Some(spinner) = thinking_spinner.take() {
+                        spinner.stop();
+                    }
+                    stream.set_context(context_used, context_limit);
                     stream.print_token(&t);
                 }
                 StreamEvent::Done => {

@@ -250,6 +250,57 @@ if let Some(meta) = model.metadata() {
 
 ---
 
+#### `context_used`
+
+Get current context usage (number of tokens in context).
+
+```rust
+pub fn context_used(&self) -> Option<usize>
+```
+
+**Example:**
+
+```rust
+let used = model.context_used().unwrap_or(0);
+println!("Using {} tokens", used);
+```
+
+---
+
+#### `context_limit`
+
+Get maximum context window size.
+
+```rust
+pub fn context_limit(&self) -> Option<usize>
+```
+
+**Example:**
+
+```rust
+let limit = model.context_limit().unwrap_or(4096);
+println!("Context limit: {} tokens", limit);
+```
+
+---
+
+#### `context_percentage`
+
+Get context usage as percentage (0.0 - 100.0).
+
+```rust
+pub fn context_percentage(&self) -> Option<f32>
+```
+
+**Example:**
+
+```rust
+let pct = model.context_percentage().unwrap_or(0.0);
+println!("{:.1}% context used", pct);
+```
+
+---
+
 ## Re-exports
 
 These types are also exported at the crate root:
@@ -284,9 +335,15 @@ Events during streaming generation.
 ```rust
 pub enum StreamEvent {
     Token(String),
+    PrefillStatus(usize),
     Done,
 }
 ```
+
+**Variants:**
+- `Token(String)` - A generated token
+- `PrefillStatus(usize)` - Prompt processing status (token count)
+- `Done` - Generation complete
 
 ### `Message`
 

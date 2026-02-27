@@ -184,6 +184,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Context Management
+
+Monitor and manage context usage:
+
+```rust
+use oxide_rs::Model;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut model = Model::new("model.gguf")?.load()?;
+
+    // Get context usage
+    let used = model.context_used().unwrap_or(0);
+    let limit = model.context_limit().unwrap_or(4096);
+    let percentage = model.context_percentage().unwrap_or(0.0);
+
+    println!("Context: {} / {} tokens ({:.1}%)", used, limit, percentage);
+
+    // After generating, check again
+    model.generate("Hello!")?;
+    let new_used = model.context_used().unwrap_or(0);
+    println!("After generation: {} tokens used", new_used);
+
+    Ok(())
+}
+```
+
+### Streaming vs Non-Streaming
+
+There is **no performance difference** between streaming and non-streaming generation. Both use the same inference engine and generate tokens at the same speed.
+
+- **Non-streaming** (`generate()`): Accumulates all tokens, returns complete response at once
+- **Streaming** (`generate_stream()`): Callback fires after each token, enabling real-time display
+
+```rust
+// Non-streaming - returns all at once
+let response = model.generate("Hello!")?;
+
+// Streaming - callback fires per token
+model.generate_stream("Hello!", |token| {
+    print!("{}", token);
+})?;
+```
+
 ## Error Handling
 
 All operations return `Result<T, Box<dyn std::error::Error>>`:
@@ -206,3 +249,5 @@ fn main() {
 3. **Adjust max_tokens** - Set appropriate limits based on your use case
 4. **Handle streaming for long outputs** - Provides better UX for generated text
 5. **Set appropriate repeat_penalty** - Higher values (1.2+) reduce repetition but may affect coherence
+6. **Monitor context** - Use `context_used()` and `context_percentage()` to avoid exceeding limits
+7. **Clear history when needed** - Call `clear_history()` to reset context for new conversations

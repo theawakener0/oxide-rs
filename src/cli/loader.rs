@@ -127,7 +127,14 @@ impl Drop for ModelLoader {
     }
 }
 
-pub fn print_model_info(name: &str, size: &str, quant: &str, layers: usize, dim: usize) {
+pub fn print_model_info(
+    name: &str,
+    size: &str,
+    quant: &str,
+    layers: usize,
+    dim: usize,
+    context: usize,
+) {
     let mut stdout = io::stdout();
 
     execute!(
@@ -154,6 +161,14 @@ pub fn print_model_info(name: &str, size: &str, quant: &str, layers: usize, dim:
         Print("Quant:   "),
         SetForegroundColor(Theme::FERRIS_ORANGE),
         Print(quant),
+        ResetColor,
+        Print("\n"),
+        SetForegroundColor(Theme::IRON_GRAY),
+        Print("  ├─ "),
+        ResetColor,
+        Print("Context: "),
+        SetForegroundColor(Theme::TEXT_SECONDARY),
+        Print(format!("{} tokens", context)),
         ResetColor,
         Print("\n"),
         SetForegroundColor(Theme::IRON_GRAY),

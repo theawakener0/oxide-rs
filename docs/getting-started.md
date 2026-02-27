@@ -65,6 +65,25 @@ oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
   --max-tokens 256
 ```
 
+## Interactive Mode Commands
+
+When running in interactive mode, you can use these commands:
+
+| Command | Description |
+|---------|-------------|
+| `/clear` | Clear conversation history |
+| `/context` | Show context usage (tokens used / limit) |
+| `/stats` | Show model info and current settings |
+| `/help` | Show available commands |
+| `/exit` | Exit the program |
+
+## Features
+
+- **Thinking Spinner**: Shows `🦀💭 Thinking...` animation while waiting for the first token
+- **Live Stats**: Displays tokens per second every 0.5s during generation
+- **Context Tracking**: Shows context usage in stats (e.g., `Context: 2048/4096`)
+- **Special Token Handling**: Automatically strips chat template tokens and converts newlines
+
 ## Library Quick Start
 
 Add to your `Cargo.toml`:

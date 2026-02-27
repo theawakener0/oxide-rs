@@ -350,6 +350,7 @@ impl Model {
                     callback(t);
                 }
                 StreamEvent::Done => {}
+                StreamEvent::PrefillStatus(_) => {}
             },
         )?;
 
@@ -450,6 +451,45 @@ impl Model {
     /// ```
     pub fn metadata(&self) -> Option<&GgufMetadata> {
         self.generator.as_ref().map(|g| g.metadata())
+    }
+
+    /// Get current context usage.
+    ///
+    /// Returns the number of tokens currently in the context.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// println!("Using {} tokens", model.context_used());
+    /// ```
+    pub fn context_used(&self) -> Option<usize> {
+        self.generator.as_ref().map(|g| g.context_used())
+    }
+
+    /// Get context limit.
+    ///
+    /// Returns the maximum context window size.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// println!("Context limit: {} tokens", model.context_limit());
+    /// ```
+    pub fn context_limit(&self) -> Option<usize> {
+        self.generator.as_ref().map(|g| g.context_limit())
+    }
+
+    /// Get context usage percentage.
+    ///
+    /// Returns the percentage of context used (0.0 - 100.0).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// println!("{:.1}% context used", model.context_percentage());
+    /// ```
+    pub fn context_percentage(&self) -> Option<f32> {
+        self.generator.as_ref().map(|g| g.context_percentage())
     }
 }
 
