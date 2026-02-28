@@ -22,9 +22,9 @@ const THINKING_FRAMES: &[&str] = &[
 
 pub fn format_token_count(n: usize) -> String {
     if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
+        format!("{:.1}M", n as f64 / 1_000_000)
     } else if n >= 1_000 {
-        format!("{:.1}k", n as f64 / 1_000.0)
+        format!("{:.1}k", n as f64 / 1_000)
     } else {
         n.to_string()
     }
