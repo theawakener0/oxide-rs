@@ -130,7 +130,6 @@ pub struct StreamOutput {
     first_token: bool,
     start_time: Instant,
     token_count: usize,
-    last_stats_time: Instant,
     context_used: usize,
     context_limit: usize,
     prompt_tokens: usize,
@@ -144,7 +143,6 @@ impl StreamOutput {
             first_token: true,
             start_time: Instant::now(),
             token_count: 0,
-            last_stats_time: Instant::now(),
             context_used: 0,
             context_limit: 4096,
             prompt_tokens: 0,
@@ -174,40 +172,6 @@ impl StreamOutput {
             execute!(self.stdout, Print(&cleaned)).ok();
             self.stdout.flush().ok();
         }
-
-        if self.last_stats_time.elapsed() >= Duration::from_millis(500) {
-            self.print_live_stats();
-            self.last_stats_time = Instant::now();
-        }
-    }
-
-    fn print_live_stats(&mut self) {
-        let elapsed = self.start_time.elapsed();
-        let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 {
-            self.token_count as f64 / elapsed.as_secs_f64()
-        } else {
-            0.0
-        };
-
-        let current_context = self.context_used + self.prompt_tokens + self.token_count;
-
-        execute!(
-            self.stdout,
-            SetForegroundColor(Theme::IRON_GRAY),
-            Print("\n  ▸ "),
-            ResetColor,
-            SetForegroundColor(Theme::TEXT_SECONDARY),
-            Print(format!(
-                "{} tokens • {:.1} tok/s • Context: {}/{}",
-                self.token_count,
-                tokens_per_sec,
-                format_token_count(current_context),
-                format_token_count(self.context_limit)
-            )),
-            ResetColor,
-            Print("\n")
-        )
-        .ok();
     }
 
     pub fn finish(&mut self) {

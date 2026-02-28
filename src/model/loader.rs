@@ -166,7 +166,11 @@ impl Model {
             .and_then(|v| v.to_string().ok().map(|s| s.to_string()))
             .or_else(|| {
                 // Try to find quantization in various model metadata keys
-                let quant_keys = ["quantization_version", "quantization"];
+                let quant_keys = [
+                    "quantization_version",
+                    "quantization",
+                    "quantization_format",
+                ];
                 for key in quant_keys {
                     if let Some(v) = md.get(&format!("{}.{}", arch, key)) {
                         if let Ok(s) = v.to_string() {
@@ -181,12 +185,15 @@ impl Model {
             .or_else(|| {
                 filename
                     .split('.')
-                    .rfind(|s| !s.eq_ignore_ascii_case("gguf") && !s.eq_ignore_ascii_case("bin"))
+                    .filter(|s| !s.eq_ignore_ascii_case("gguf") && !s.eq_ignore_ascii_case("bin"))
+                    .last()
                     .map(|s| s.to_string())
                     .filter(|s| {
-                        s.len() >= 3
+                        s.len() >= 2
                             && (s.starts_with("q") || s.starts_with("Q"))
-                            && s.chars().skip(1).all(|c| c.is_ascii_digit() || c == '_')
+                            && s.chars()
+                                .skip(1)
+                                .all(|c| c.is_ascii_digit() || c == '_' || c == '-')
                     })
             });
 
