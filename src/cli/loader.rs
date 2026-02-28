@@ -12,6 +12,7 @@ use crossterm::{
     terminal::ClearType,
 };
 
+use super::stream::format_token_count;
 use super::theme::Theme;
 
 const FERRIS_WALKING: &[&str] = &[
@@ -168,7 +169,7 @@ pub fn print_model_info(
         ResetColor,
         Print("Context: "),
         SetForegroundColor(Theme::TEXT_SECONDARY),
-        Print(format!("{} tokens", context)),
+        Print(format!("{} tokens", format_token_count(context))),
         ResetColor,
         Print("\n"),
         SetForegroundColor(Theme::IRON_GRAY),

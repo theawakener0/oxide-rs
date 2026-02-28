@@ -169,7 +169,16 @@ impl StreamOutput {
         let cleaned = strip_special_tokens(token);
 
         if !cleaned.is_empty() {
-            execute!(self.stdout, Print(&cleaned)).ok();
+            // Add space if needed for proper word spacing
+            let output = if !cleaned.starts_with(' ')
+                && !cleaned.starts_with('\n')
+                && self.token_count > 1
+            {
+                format!(" {}", cleaned)
+            } else {
+                cleaned
+            };
+            execute!(self.stdout, Print(&output)).ok();
             self.stdout.flush().ok();
         }
     }

@@ -228,7 +228,9 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
             let percentage = generator.context_percentage();
             println!(
                 "  Context: {} / {} tokens ({:.1}%)\n",
-                used, limit, percentage
+                format_token_count(used),
+                format_token_count(limit),
+                percentage
             );
             continue;
         }
@@ -240,7 +242,10 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
                 "  Quant:     {}",
                 meta.quantization.as_deref().unwrap_or("Unknown")
             );
-            println!("  Context:   {} tokens", meta.context_length);
+            println!(
+                "  Context:   {} tokens",
+                format_token_count(meta.context_length)
+            );
             println!("  Layers:    {}", meta.n_layer);
             println!("  Embedding: {}", meta.n_embd);
             println!("  Vocab:     {}", meta.vocab_size);
@@ -298,5 +303,15 @@ fn format_size(size: u64) -> String {
         format!("{:.1}MB", size as f64 / 1e6)
     } else {
         format!("{:.1}GB", size as f64 / 1e9)
+    }
+}
+
+fn format_token_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.0}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
     }
 }
