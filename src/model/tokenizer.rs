@@ -14,8 +14,6 @@ pub struct TokenizerWrapper {
     eos_token_id: u32,
     pending_tokens: Vec<u32>,
     cached_decoded: String,
-    encode_buffer: Vec<u32>,
-    decode_buffer: String,
 }
 
 fn get_cache_path(model_path: &PathBuf) -> Result<PathBuf> {
@@ -110,8 +108,6 @@ impl TokenizerWrapper {
             eos_token_id,
             pending_tokens: Vec::new(),
             cached_decoded: String::new(),
-            encode_buffer: Vec::with_capacity(4096),
-            decode_buffer: String::with_capacity(4096),
         })
     }
 
@@ -128,8 +124,6 @@ impl TokenizerWrapper {
             eos_token_id,
             pending_tokens: Vec::new(),
             cached_decoded: String::new(),
-            encode_buffer: Vec::with_capacity(4096),
-            decode_buffer: String::with_capacity(4096),
         })
     }
 
@@ -177,7 +171,7 @@ impl TokenizerWrapper {
     pub fn decode_next(&mut self, token: u32) -> Result<Option<String>> {
         self.pending_tokens.push(token);
 
-        let new_token_decoded = self.decode(&[token])?;
+        let new_token_decoded = self.inner.decode_single(token, false)?;
 
         self.cached_decoded.push_str(&new_token_decoded);
 
