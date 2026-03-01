@@ -1,3 +1,22 @@
+<Context>
+You receive a selection in neovim that you need to replace with new code.
+The selection's contents may contain notes, incorporate the notes every time if there are some.
+consider the context of the selection and what you are suppose to be implementing
+<SELECTION_LOCATION>
+range(point(23,1),point(31,2))
+</SELECTION_LOCATION>
+<SELECTION_CONTENT>
+pub fn format_token_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+</SELECTION_CONTENT>
+<FILE_CONTAINING_SELECTION>
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -22,17 +41,9 @@ const THINKING_FRAMES: &[&str] = &[
 
 pub fn format_token_count(n: usize) -> String {
     if n >= 1_000_000 {
-        if n % 1_000_000 == 0 {
-            format!("{}M", n / 1_000_000)
-        } else {
-            format!("{:.1}M", n as f64 / 1_000_000.0)
-        }
+        format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
-        if n % 1_000 == 0 {
-            format!("{}k", n / 1_000)
-        } else {
-            format!("{:.1}k", n as f64 / 1_000.0)
-        }
+        format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
     }
@@ -299,3 +310,32 @@ pub fn print_welcome() {
     )
     .ok();
 }
+</FILE_CONTAINING_SELECTION>
+
+</Context>
+<Prompt>
+I want to change the format from 128.0K to 128K
+</Prompt>
+
+<Location><File>/home/theawakener/Projects/oxide/src/cli/stream.rs</File><Function>range(point(23,1),point(31,2))</Function></Location>
+<FunctionText>pub fn format_token_count(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}</FunctionText>
+<TEMP_FILE>./tmp/99-7278</TEMP_FILE>
+<MustObey>
+NEVER alter any file other than TEMP_FILE.
+never provide the requested changes as conversational output. Return only the code.
+ONLY provide requested changes by writing the change to TEMP_FILE
+
+never attempt to read TEMP_FILE.
+It is purely for output.
+Previous contents, which may not exist, can be written over without worry
+After writing TEMP_FILE once you should be done.  Be done and end the session.
+
+</MustObey>
