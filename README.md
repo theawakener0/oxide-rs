@@ -11,27 +11,29 @@
 - **Full Tokenizer Compatibility** — Supports all llama.cpp tokenizer types via [shimmytok](https://crates.io/crates/shimmytok) (SPM, BPE, WPM, UGM, RWKV)
 - **Tokenizer JSON Extraction** — Extracts and caches tokenizer.json from GGUF when available
 - **Automatic Chat Templates** — Uses Jinja templates embedded in GGUF files via [minijinja](https://crates.io/crates/minijinja)
-- **Streaming Output** — Real-time token generation with tokens-per-second metrics
+- **True Token-by-Token Streaming** — Real-time streaming with immediate token display
+- **Automatic Special Token Filtering** — Uses tokenizer's built-in detection (no hardcoded patterns)
 - **Multiple Sampling Strategies** — Temperature, top-k, top-p, and argmax sampling
 - **Repeat Penalty** — Prevents repetitive output with configurable penalty window
 - **Interactive REPL** — Full conversation mode with session history
 - **One-Shot Mode** — Non-interactive generation for scripting/pipelines
 - **Batch Processing** — Parallel tokenization for multiple prompts
+- **Dynamic Batching Ready** — Infrastructure for API batching (future integration)
 - **PagedAttention Ready** — Infrastructure for KV cache management (future integration)
 - **Beautiful CLI** — Animated loading, syntax-highlighted output, Rust-themed
 - **Smart Defaults** — Default system prompt reduces hallucinations, temperature tuned for accuracy
 - **Model Warmup** — Pre-compiles compute kernels on startup for faster first-token generation
 - **Memory-Mapped Loading** — OS-managed paging for instant load times and lower memory usage
+- **Thread Pinning** — Configurable CPU thread management for consistent performance
+- **SIMD Runtime Detection** — Auto-detects AVX2/AVX-512/NEON for optimal performance
 - **Safe Thread Configuration** — Uses rayon ThreadPoolBuilder instead of unsafe env vars
 - **Pre-allocated Buffers** — Zero-copy runtime allocations for smooth generation
 - **Tokenizer Caching** — Caches tokenizer to disk for faster subsequent loads
 - **Page Prefetching** — Preloads hot model pages into memory for faster first-token
 - **Quantization Display** — Shows actual quantization from GGUF metadata or filename
-- **Thinking Spinner** — Animated `🦀💭 Thinking...` during prefill phase
 - **Live tok/s Display** — Real-time tokens-per-second updates during generation
 - **Context Tracking** — Shows context usage in loading info and generation stats
-- **Special Token Handling** — Automatically strips chat template tokens for clean output
-- **Configurable Performance** — Batch size configurable via CLI
+- **Configurable Performance** — Batch size, threads, SIMD level configurable via CLI
 
 ## Installation
 
@@ -175,8 +177,12 @@ For more examples, see the [docs/](docs/) directory.
 | `--repeat-penalty` | `1.1` | Penalty for repeated tokens |
 | `--repeat-last-n` | `64` | Context window for repeat penalty |
 | `--batch-size` | `128` | Batch size for warmup/prefill |
+| `--max-batch-size` | `4` | Maximum batch size for dynamic batching |
+| `--batch-window-ms` | `1` | Time window (ms) for batching requests |
 | `--seed` | `299792458` | Random seed for reproducibility |
-| `--threads` | *auto* | Number of threads for inference (auto-detects optimal) |
+| `--threads` | *auto* | Number of threads (0 = auto-detect n-1) |
+| `--reserve-cores` | `0` | Number of cores to reserve for OS |
+| `--simd-level` | `auto` | SIMD level (auto, avx512, avx2, neon, scalar) |
 | `-p, --prompt` | *none* | Input prompt (for one-shot mode) |
 | `-o, --once` | `false` | Run in non-interactive mode |
 
@@ -281,6 +287,13 @@ graph TB
         callback[StreamEvent Callback]
     end
 
+    subgraph Optimizations["Performance Layer"]
+        dynamic_batcher[DynamicBatcher]
+        prefix_cache[PrefixCache]
+        simd_dispatch[SIMD Dispatch]
+        thread_pinner[Thread Pinner]
+    end
+
     subgraph Model["Model Layer"]
         model[Model Weights]
         tokenizer[Tokenizer Wrapper]
@@ -291,6 +304,7 @@ graph TB
         candle[Candle Transformers]
         shimmytok[shimmytok]
         rayon[Rayon]
+        tokio[Tokio]
         minijinja[minijinja]
     end
 
@@ -301,13 +315,17 @@ graph TB
     generator --> model
     generator --> tokenizer
     generator --> callback
-    generator --> metadata
     
     callback --> stream
     template --> minijinja
     
     model --> candle
     tokenizer --> shimmytok
+    
+    generator --> dynamic_batcher
+    generator --> prefix_cache
+    generator --> simd_dispatch
+    generator --> thread_pinner
     
     banner --> theme
     loader --> theme
@@ -335,16 +353,21 @@ sequenceDiagram
     Generator->>Model: forward(tokens)
     Model-->>Generator: logits
     
-    loop For each token
+    loop For each generated token
         Generator->>Generator: sample(logits)
-        Generator->>Tokenizer: decode_next(token)
-        Tokenizer-->>Generator: text
-        Generator->>Stream: StreamEvent::Token(text)
-        Stream->>User: Display token
+        Generator->>Tokenizer: is_special_token(token)
+        alt Not special token
+            Generator->>Tokenizer: decode_single(token)
+            Tokenizer-->>Generator: text
+            Generator->>Stream: StreamEvent::Token(text)
+            Stream->>User: Display immediately
+        else Special token
+            Generator->>Generator: Skip (no output)
+        end
     end
     
     Generator->>Stream: StreamEvent::Done
-    Stream->>User: Show stats (tok/s)
+    Stream->>User: Show stats (tok/s, context)
 ```
 
 ## Development
@@ -378,6 +401,7 @@ make clean
 | `candle-transformers` | Pre-built model architectures (LLaMA, LFM2) |
 | `shimmytok` | GGUF tokenizer (100% llama.cpp compatible) |
 | `rayon` | Parallel iteration and thread pool management |
+| `tokio` | Async runtime for dynamic batching |
 | `minijinja` | Jinja2 template engine for chat templates |
 | `clap` | CLI argument parsing with derive macros |
 | `crossterm` | Cross-platform terminal control |
@@ -389,14 +413,18 @@ make clean
 
 - **CPU-only inference** — No GPU dependencies, portable binaries
 - **Quantized models** — Q4_K_M provides good quality/speed tradeoff; other quantizations supported
-- **Streaming decode** — Tokens displayed as generated for responsive UX
+- **True token-by-token streaming** — Immediate token display as generated
+- **Automatic special token filtering** — Uses shimmytok's built-in is_special_token() for all tokenizers
+- **Optimized decode_single** — shimmytok's native single-token decoding for fast streaming
 - **Parallel batch tokenization** — Multiple prompts tokenized concurrently
 - **Memory-efficient generation** — Reduced allocations per prompt
 - **Context caching** — Efficient multi-turn conversations with token history management
 - **Model warmup** — Pre-compiles compute kernels on startup for faster first-token generation
 - **Smart defaults** — Temperature 0.3 for factual accuracy, default system prompt reduces hallucinations
+- **Thread pinning** — Configurable CPU core assignment for consistent performance
+- **SIMD runtime detection** — Auto-detects AVX2/AVX-512/NEON, uses optimal code paths
 - **Safe threading** — Rayon ThreadPoolBuilder for predictable thread management
-- **Optimized tokenizer decode** — O(n) instead of O(n²) for faster token generation
+- **Tokenizer caching** — Disk cache for instant subsequent loads
 
 
 For more details, see [Performance Guide](docs/performance.md).
@@ -404,9 +432,9 @@ For more details, see [Performance Guide](docs/performance.md).
 ## Roadmap
 
 - [ ] PagedAttention integration (full KV cache support)
-- [ ] Multi-modal support
 - [ ] OpenAI-compatible API server
 - [ ] Model download/management
+- [ ] Multi-modal support
 
 ## License
 
