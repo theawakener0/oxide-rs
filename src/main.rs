@@ -7,7 +7,10 @@ use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
     StreamOutput, ThinkingSpinner,
 };
-use oxide_rs::inference::{Generator, StreamEvent};
+use oxide_rs::inference::{
+    init_simd, init_thread_pinner, simd_dispatch::SimdLevel, thread_pinner::ThreadPinnerConfig,
+    Generator, StreamEvent,
+};
 use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -71,6 +74,18 @@ struct Args {
     /// Run in non-interactive mode (generate and exit)
     #[arg(short, long)]
     once: bool,
+
+    /// Maximum batch size for dynamic batching (default: 8)
+    #[arg(long, default_value = "8")]
+    max_batch_size: usize,
+
+    /// Batch window in milliseconds (default: 100ms)
+    #[arg(long, default_value = "100")]
+    batch_window_ms: u64,
+
+    /// SIMD level (auto/avx512/avx2/neon/scalar)
+    #[arg(long, default_value = "auto")]
+    simd: String,
 }
 
 fn main() -> Result<()> {
@@ -84,9 +99,27 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    let num_cpus = num_cpus::get();
     let num_threads = args
         .threads
-        .unwrap_or_else(|| num_cpus::get().saturating_sub(1).max(1));
+        .unwrap_or_else(|| num_cpus.saturating_sub(1).max(1));
+
+    let simd_level = SimdLevel::from_str(&args.simd);
+    let simd = init_simd(simd_level);
+    tracing::info!(
+        "SIMD: {:?} (AVX512: {}, AVX2: {}, NEON: {})",
+        simd.level,
+        simd.cpu_features.has_avx512,
+        simd.cpu_features.has_avx2,
+        simd.cpu_features.has_neon
+    );
+
+    let thread_pinner = init_thread_pinner(ThreadPinnerConfig::auto(num_cpus));
+    tracing::info!(
+        "Thread pinning: {} threads on cores {:?}",
+        thread_pinner.num_threads(),
+        thread_pinner.core_ids()
+    );
 
     ThreadPoolBuilder::new()
         .num_threads(num_threads)

@@ -95,15 +95,18 @@ impl Model {
     }
 
     pub fn prefetch_mmap(mmap: &Mmap) {
-        let prefetch_mb = 512;
+        let prefetch_mb = 1024;
         let size = mmap.len();
         let ptr = mmap.as_ptr() as *mut std::ffi::c_void;
 
         unsafe {
-            // Set sequential access pattern
             libc::madvise(ptr, size, libc::MADV_SEQUENTIAL);
 
-            // Prefetch 512MB for better first-token performance
+            #[cfg(target_os = "linux")]
+            {
+                libc::madvise(ptr, size, libc::MADV_HUGEPAGE);
+            }
+
             let prefetch_size = std::cmp::min(prefetch_mb * 1024 * 1024, size);
             libc::madvise(ptr, prefetch_size, libc::MADV_WILLNEED);
         }

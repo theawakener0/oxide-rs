@@ -432,7 +432,7 @@ impl Model {
     /// ```
     pub fn generate_batch(
         &mut self,
-        prompts: Vec<&str>,
+        prompts: Vec<String>,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let generator = self
             .generator

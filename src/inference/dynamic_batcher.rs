@@ -1,7 +1,7 @@
 //! Dynamic Batching for LLM Inference
 //!
-//! Groups incoming requests into small batches (max 4) that arrive within
-//! a configurable time window (default 1ms) for improved throughput while
+//! Groups incoming requests into small batches (max 8) that arrive within
+//! a configurable time window (default 100ms) for improved throughput while
 //! maintaining low latency.
 
 use std::sync::Arc;
@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
+
+use crate::inference::Generator;
 
 pub struct BatchConfig {
     pub max_batch_size: usize,
@@ -19,9 +21,19 @@ pub struct BatchConfig {
 impl Default for BatchConfig {
     fn default() -> Self {
         Self {
-            max_batch_size: 4,
-            batch_window_ms: 1,
+            max_batch_size: 8,
+            batch_window_ms: 100,
             max_queue_size: 100,
+        }
+    }
+}
+
+impl Clone for BatchConfig {
+    fn clone(&self) -> Self {
+        Self {
+            max_batch_size: self.max_batch_size,
+            batch_window_ms: self.batch_window_ms,
+            max_queue_size: self.max_queue_size,
         }
     }
 }
@@ -55,7 +67,25 @@ impl DynamicBatcher {
         let config_clone = config.clone();
 
         tokio::spawn(async move {
-            Self::batcher_loop(request_rx, config_clone, counter_clone).await;
+            Self::batcher_loop(request_rx, config_clone, counter_clone, None).await;
+        });
+
+        Self {
+            config,
+            request_tx,
+            batch_counter,
+        }
+    }
+
+    pub fn with_generator(config: BatchConfig, generator: Arc<tokio::sync::Mutex<Generator>>) -> Self {
+        let (request_tx, request_rx) = mpsc::channel(config.max_queue_size);
+        let batch_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let counter_clone = batch_counter.clone();
+        let config_clone = config.clone();
+
+        tokio::spawn(async move {
+            Self::batcher_loop(request_rx, config_clone, counter_clone, Some(generator)).await;
         });
 
         Self {
@@ -106,6 +136,7 @@ impl DynamicBatcher {
         mut request_rx: mpsc::Receiver<BatchRequest>,
         config: BatchConfig,
         _counter: Arc<std::sync::atomic::AtomicU64>,
+        generator: Option<Arc<tokio::sync::Mutex<Generator>>>,
     ) {
         let window_duration = Duration::from_millis(config.batch_window_ms);
         let max_batch_size = config.max_batch_size;
@@ -125,7 +156,8 @@ impl DynamicBatcher {
                 }
             } else if time_since_last >= window_duration || pending_requests.len() >= max_batch_size {
                 if !pending_requests.is_empty() {
-                    Self::process_batch(pending_requests.drain(..).collect()).await;
+                    let requests: Vec<_> = pending_requests.drain(..).collect();
+                    Self::process_batch(requests, generator.clone()).await;
                     last_batch_time = Instant::now();
                 }
             } else {
@@ -135,7 +167,8 @@ impl DynamicBatcher {
                             pending_requests.push(req);
                         } else {
                             if !pending_requests.is_empty() {
-                                Self::process_batch(pending_requests.drain(..).collect()).await;
+                                let requests: Vec<_> = pending_requests.drain(..).collect();
+                                Self::process_batch(requests, generator.clone()).await;
                                 last_batch_time = Instant::now();
                             }
                             pending_requests.push(req);
@@ -143,13 +176,15 @@ impl DynamicBatcher {
                     }
                     Ok(None) => {
                         if !pending_requests.is_empty() {
-                            Self::process_batch(pending_requests.drain(..).collect()).await;
+                            let requests: Vec<_> = pending_requests.drain(..).collect();
+                            Self::process_batch(requests, generator.clone()).await;
                         }
                         break;
                     }
                     Err(_) => {
                         if !pending_requests.is_empty() {
-                            Self::process_batch(pending_requests.drain(..).collect()).await;
+                            let requests: Vec<_> = pending_requests.drain(..).collect();
+                            Self::process_batch(requests, generator.clone()).await;
                             last_batch_time = Instant::now();
                         }
                     }
@@ -158,22 +193,61 @@ impl DynamicBatcher {
         }
     }
 
-    async fn process_batch(requests: Vec<BatchRequest>) {
+    async fn process_batch(requests: Vec<BatchRequest>, generator: Option<Arc<tokio::sync::Mutex<Generator>>>) {
         if requests.is_empty() {
             return;
         }
 
-        tracing::debug!(
-            "Processing batch of {} requests",
-            requests.len()
-        );
+        tracing::debug!("Processing batch of {} requests", requests.len());
 
-        // Placeholder - actual batch processing needs integration with Generator
-        for req in requests {
-            let _ = req.sender.send(BatchResult {
-                id: req.id,
-                result: Err("Batch processing not yet integrated with Generator".to_string()),
-            });
+        match generator {
+            Some(gen) => {
+                let prompts: Vec<String> = requests.iter().map(|r| r.prompt.clone()).collect();
+                let max_tokens = requests.first().map(|r| r.max_tokens).unwrap_or(512);
+                let repeat_penalty = requests.first().map(|r| r.repeat_penalty).unwrap_or(1.1);
+                let repeat_last_n = requests.first().map(|r| r.repeat_last_n).unwrap_or(64);
+
+                let results = tokio::task::spawn_blocking(move || {
+                    let mut gen = gen.blocking_lock();
+                    gen.generate_batch(prompts, max_tokens, repeat_penalty, repeat_last_n)
+                })
+                .await;
+
+                match results {
+                    Ok(Ok(outputs)) => {
+                        for (req, result) in requests.into_iter().zip(outputs.into_iter()) {
+                            let _ = req.sender.send(BatchResult {
+                                id: req.id,
+                                result: Ok(result),
+                            });
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        for req in requests {
+                            let _ = req.sender.send(BatchResult {
+                                id: req.id,
+                                result: Err(e.to_string()),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        for req in requests {
+                            let _ = req.sender.send(BatchResult {
+                                id: req.id,
+                                result: Err(format!("Task join error: {}", e)),
+                            });
+                        }
+                    }
+                }
+            }
+            None => {
+                for req in requests {
+                    let _ = req.sender.send(BatchResult {
+                        id: req.id,
+                        result: Err("Generator not connected to batcher".to_string()),
+                    });
+                }
+            }
         }
     }
 }
@@ -188,16 +262,6 @@ impl Clone for DynamicBatcher {
     }
 }
 
-impl Clone for BatchConfig {
-    fn clone(&self) -> Self {
-        Self {
-            max_batch_size: self.max_batch_size,
-            batch_window_ms: self.batch_window_ms,
-            max_queue_size: self.max_queue_size,
-        }
-    }
-}
-
 pub struct DynamicBatcherHandle {
     batcher: DynamicBatcher,
 }
@@ -206,6 +270,12 @@ impl DynamicBatcherHandle {
     pub fn new(config: BatchConfig) -> Self {
         Self {
             batcher: DynamicBatcher::new(config),
+        }
+    }
+
+    pub fn with_generator(config: BatchConfig, generator: Arc<tokio::sync::Mutex<Generator>>) -> Self {
+        Self {
+            batcher: DynamicBatcher::with_generator(config, generator),
         }
     }
 
@@ -237,8 +307,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_config_defaults() {
         let config = BatchConfig::default();
-        assert_eq!(config.max_batch_size, 4);
-        assert_eq!(config.batch_window_ms, 1);
+        assert_eq!(config.max_batch_size, 8);
+        assert_eq!(config.batch_window_ms, 100);
         assert_eq!(config.max_queue_size, 100);
     }
 }

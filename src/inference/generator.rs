@@ -467,7 +467,7 @@ impl Generator {
 
     pub fn generate_batch(
         &mut self,
-        prompts: Vec<&str>,
+        prompts: Vec<String>,
         max_tokens: usize,
         repeat_penalty: f32,
         repeat_last_n: usize,
@@ -487,7 +487,7 @@ impl Generator {
                 }
                 all_messages.push(Message {
                     role: "user".into(),
-                    content: prompt.to_string(),
+                    content: prompt.clone(),
                 });
 
                 let prompt_text = template.apply(&all_messages)?;
