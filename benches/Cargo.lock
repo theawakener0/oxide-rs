@@ -928,6 +928,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shimmytok",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
