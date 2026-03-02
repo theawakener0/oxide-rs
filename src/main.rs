@@ -113,6 +113,45 @@ fn main() -> Result<()> {
         simd.cpu_features.has_neon
     );
 
+    // Set RAYON_NUM_THREADS before spawning the loading thread so candle's
+    // Rayon pool initializes with the right thread count on first use.
+    // Safety: no other threads are alive yet at this point.
+    unsafe { std::env::set_var("RAYON_NUM_THREADS", num_threads.to_string()) };
+    tracing::info!(
+        "Using {} threads for inference (RAYON_NUM_THREADS set)",
+        num_threads
+    );
+
+    // Spawn model loading in the background immediately so it overlaps with
+    // thread pool setup and banner display below.
+    let model_path = args.model.clone();
+    let tokenizer_path = args.tokenizer.clone();
+    let (temperature, top_p, top_k, seed, batch_size) = (
+        args.temperature,
+        args.top_p,
+        args.top_k,
+        args.seed,
+        args.batch_size,
+    );
+    let system_prompt = args
+        .system
+        .clone()
+        .or_else(|| Some(DEFAULT_SYSTEM_PROMPT.to_string()));
+
+    let load_handle = std::thread::spawn(move || {
+        Generator::new(
+            &model_path,
+            tokenizer_path.as_ref(),
+            temperature,
+            top_p,
+            top_k,
+            seed,
+            system_prompt,
+            batch_size,
+        )
+    });
+
+    // Build pinned thread pool while the model loads in the background.
     let thread_pinner = init_thread_pinner(ThreadPinnerConfig::auto(num_cpus));
     tracing::info!(
         "Thread pinning: {} threads on cores {:?}",
@@ -130,45 +169,31 @@ fn main() -> Result<()> {
         );
     });
 
-    // Set RAYON_NUM_THREADS before Generator::new() so candle's internal Rayon
-    // pool is right-sized from startup. Candle reads this env var in
-    // candle_core::utils::get_num_threads() when it first spawns its pool.
-    // Safety: single-threaded at this point — no other threads have been spawned yet.
-    unsafe { std::env::set_var("RAYON_NUM_THREADS", num_threads.to_string()) };
-    tracing::info!(
-        "Using {} threads for inference (RAYON_NUM_THREADS set)",
-        num_threads
-    );
-
+    // Banner renders instantly (no animation delays) — happens while model loads.
     print_banner();
 
+    // Spinner starts here; model loading is already in progress.
     let loader = ModelLoader::new();
 
-    let generator = match Generator::new(
-        &args.model,
-        args.tokenizer.as_ref(),
-        args.temperature,
-        args.top_p,
-        args.top_k,
-        args.seed,
-        args.system
-            .clone()
-            .or_else(|| Some(DEFAULT_SYSTEM_PROMPT.to_string())),
-        args.batch_size,
-    ) {
-        Ok(mut g) => {
-            // Run warmup on pinned threads so candle's Rayon ops use CPU-affine
-            // threads from the very first forward pass.
-            if let Err(e) = pinned_pool.install(|| g.warmup(128)) {
-                tracing::warn!("Model warmup failed: {}", e);
-            }
-            g
-        }
-        Err(e) => {
+    // Wait for model loading to complete.
+    let mut generator = match load_handle.join() {
+        Ok(Ok(g)) => g,
+        Ok(Err(e)) => {
             loader.finish_with_error(&format!("Failed: {}", e));
             return Err(e);
         }
+        Err(_) => {
+            loader.finish_with_error("Model loading thread panicked");
+            return Err(anyhow::anyhow!("Model loading thread panicked"));
+        }
     };
+
+    // Single-token warmup: primes the branch predictor and allocator hot paths
+    // with negligible cost (~50ms). 128-token warmup was removed — its page-cache
+    // benefit is now covered by the madvise(WILLNEED) applied during mmap setup.
+    if let Err(e) = pinned_pool.install(|| generator.warmup(1)) {
+        tracing::warn!("Model warmup failed: {}", e);
+    }
 
     let metadata = generator.metadata().clone();
     loader.finish(&metadata.name);

@@ -195,32 +195,35 @@ impl Generator {
         self.batch_size
     }
 
-    pub fn generate<F>(
-        &mut self,
-        prompt: &str,
-        max_tokens: usize,
-        repeat_penalty: f32,
-        repeat_last_n: usize,
-        callback: F,
-    ) -> Result<String>
-    where
-        F: FnMut(StreamEvent),
-    {
+    /// Appends the user message to history, builds the full chat prompt, encodes
+    /// it, and trims the token history if needed to fit within the context window.
+    /// Returns the encoded prompt tokens ready for generation.
+    fn prepare_prompt(&mut self, prompt: &str, max_tokens: usize) -> Result<Vec<u32>> {
         self.messages.push(Message {
             role: "user".into(),
             content: prompt.into(),
         });
 
-        let mut all_messages = Vec::new();
-        if let Some(ref sys) = self.system_prompt {
-            all_messages.push(Message {
-                role: "system".into(),
-                content: sys.clone(),
-            });
-        }
-        all_messages.extend(self.messages.clone());
+        // Build the messages slice to render: system (if any) followed by history.
+        // Avoid cloning message contents — collect references into a temporary Vec.
+        let sys_msg;
+        let all_messages: Vec<&Message> = {
+            let mut v: Vec<&Message> = Vec::with_capacity(self.messages.len() + 1);
+            if let Some(ref sys) = self.system_prompt {
+                sys_msg = Message {
+                    role: "system".into(),
+                    content: sys.clone(),
+                };
+                v.push(&sys_msg);
+            }
+            v.extend(self.messages.iter());
+            v
+        };
 
-        let prompt_text = self.template.apply(&all_messages)?;
+        // Collect into owned Messages only for template rendering (minijinja requires
+        // Serialize, which needs owned values).
+        let owned: Vec<Message> = all_messages.into_iter().cloned().collect();
+        let prompt_text = self.template.apply(&owned)?;
         let prompt_tokens = self.tokenizer.encode(&prompt_text)?;
 
         let total_len = self.token_history.len() + prompt_tokens.len() + max_tokens;
@@ -238,6 +241,22 @@ impl Generator {
                 self.token_history.clear();
             }
         }
+
+        Ok(prompt_tokens)
+    }
+
+    pub fn generate<F>(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        repeat_penalty: f32,
+        repeat_last_n: usize,
+        callback: F,
+    ) -> Result<String>
+    where
+        F: FnMut(StreamEvent),
+    {
+        let prompt_tokens = self.prepare_prompt(prompt, max_tokens)?;
 
         let result = self.generate_internal_with_tokens(
             &prompt_tokens,
@@ -268,40 +287,9 @@ impl Generator {
     where
         F: FnMut(StreamEvent),
     {
-        self.messages.push(Message {
-            role: "user".into(),
-            content: prompt.into(),
-        });
+        let prompt_tokens = self.prepare_prompt(prompt, max_tokens)?;
 
-        let mut all_messages = Vec::new();
-        if let Some(ref sys) = self.system_prompt {
-            all_messages.push(Message {
-                role: "system".into(),
-                content: sys.clone(),
-            });
-        }
-        all_messages.extend(self.messages.clone());
-
-        let prompt_text = self.template.apply(&all_messages)?;
-        let prompt_tokens = self.tokenizer.encode(&prompt_text)?;
-
-        let total_len = self.token_history.len() + prompt_tokens.len() + max_tokens;
-        if total_len > self.metadata.context_length {
-            let excess = total_len - self.metadata.context_length;
-            if excess < self.token_history.len() {
-                let old_len = self.token_history.len();
-                self.token_history.drain(0..excess);
-                tracing::debug!(
-                    "Context truncated: {} tokens -> {} tokens (kept most recent)",
-                    old_len,
-                    self.token_history.len()
-                );
-            } else {
-                self.token_history.clear();
-            }
-        }
-
-        let _result = self.generate_internal_with_tokens(
+        self.generate_internal_with_tokens(
             &prompt_tokens,
             max_tokens,
             repeat_penalty,
@@ -382,13 +370,15 @@ impl Generator {
 
         self.all_tokens.push(next_token);
 
-        // Handle first generated token
-        let mut token_buffer: Vec<u32> = Vec::new();
+        // Emit first generated token via incremental decoder.
         if !self.tokenizer.is_special_token(next_token) {
-            token_buffer.push(next_token);
+            if let Some(text) = self.tokenizer.decode_next(next_token)? {
+                if !text.is_empty() {
+                    callback(StreamEvent::Token(text));
+                }
+            }
         }
 
-        let decode_batch_size = 1;
         let mut generated = 0usize;
 
         let gen_start = std::time::Instant::now();
@@ -414,36 +404,22 @@ impl Generator {
             self.all_tokens.push(next_token);
             generated += 1;
 
-            // Skip special tokens - use tokenizer's built-in detection
+            // Use incremental decode: emits text as soon as a word boundary is
+            // reached, without buffering or re-decoding previously seen tokens.
             if !self.tokenizer.is_special_token(next_token) {
-                token_buffer.push(next_token);
-
-                if token_buffer.len() >= decode_batch_size {
-                    if let Ok(text) = self.tokenizer.decode(&token_buffer) {
-                        if !text.is_empty() {
-                            callback(StreamEvent::Token(text));
-                        }
+                if let Some(text) = self.tokenizer.decode_next(next_token)? {
+                    if !text.is_empty() {
+                        callback(StreamEvent::Token(text));
                     }
-                    token_buffer.clear();
                 }
             }
         }
 
-        if !token_buffer.is_empty() {
-            if let Ok(text) = self.tokenizer.decode(&token_buffer) {
-                if !text.is_empty() {
-                    callback(StreamEvent::Token(text));
-                }
-            }
-            token_buffer.clear();
-        }
-
-        if let Some(rest) = self.tokenizer.decode_rest()? {
-            if !rest.is_empty() {
-                callback(StreamEvent::Token(rest));
-            }
-        }
-
+        // clear_cache() resets the incremental decoder state. decode_rest() is
+        // intentionally NOT called here: it returns the full cached_decoded
+        // accumulation (all text already streamed via decode_next), which would
+        // produce duplicate output. Clearing is sufficient — shimmytok's
+        // decode_single emits each fragment as soon as it has enough bytes.
         self.tokenizer.clear_cache();
 
         let dt = gen_start.elapsed();

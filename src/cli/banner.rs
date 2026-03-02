@@ -1,6 +1,4 @@
 use std::io::{self, Write};
-use std::thread;
-use std::time::Duration;
 
 use crossterm::{
     cursor::MoveTo,
@@ -120,12 +118,7 @@ pub fn print_banner() {
             ResetColor
         )
         .ok();
-
-        thread::sleep(Duration::from_millis(25));
-        stdout.flush().ok();
     }
-
-    thread::sleep(Duration::from_millis(50));
 
     execute!(
         stdout,
