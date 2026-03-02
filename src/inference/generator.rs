@@ -4,7 +4,6 @@ use anyhow::Result;
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::utils::apply_repeat_penalty;
 use minijinja::{context, Environment};
-use rayon::prelude::*;
 
 use crate::inference::paged_cache::PagedKvCache;
 use crate::model::{GgufMetadata, Model, TokenizerWrapper};
@@ -472,11 +471,15 @@ impl Generator {
         repeat_penalty: f32,
         repeat_last_n: usize,
     ) -> Result<Vec<String>> {
+        if prompts.is_empty() {
+            return Ok(vec![]);
+        }
+
         let template = self.template.clone();
         let system_prompt = self.system_prompt.clone();
 
         let prompt_tokens_list: Vec<Vec<u32>> = prompts
-            .par_iter()
+            .iter()
             .map(|prompt| {
                 let mut all_messages = Vec::new();
                 if let Some(ref sys) = system_prompt {
@@ -491,7 +494,7 @@ impl Generator {
                 });
 
                 let prompt_text = template.apply(&all_messages)?;
-                self.tokenizer.encode(&prompt_text)
+                Ok::<_, anyhow::Error>(self.tokenizer.encode(&prompt_text)?)
             })
             .collect::<Result<Vec<_>>>()?;
 

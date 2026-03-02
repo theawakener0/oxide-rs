@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
@@ -11,7 +11,6 @@ use oxide_rs::inference::{
     init_simd, init_thread_pinner, simd_dispatch::SimdLevel, thread_pinner::ThreadPinnerConfig,
     Generator, StreamEvent,
 };
-use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful, honest, and accurate AI assistant. If you don't know something, say so clearly. Do not make up information or hallucinate facts.";
@@ -121,10 +120,15 @@ fn main() -> Result<()> {
         thread_pinner.core_ids()
     );
 
-    ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build_global()
-        .context("Failed to build thread pool")?;
+    let pinned_pool = thread_pinner
+        .build_thread_pool()
+        .map_err(|e| anyhow::anyhow!("Failed to build pinned thread pool: {}", e))?;
+    pinned_pool.install(|| {
+        tracing::info!(
+            "Thread pool initialized with {} pinned threads",
+            num_threads
+        );
+    });
 
     tracing::info!("Using {} threads for inference", num_threads);
 

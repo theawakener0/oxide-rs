@@ -5,6 +5,7 @@
 //!
 //! This implementation uses a portable approach that works on Linux/macOS/Windows.
 
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::OnceLock;
 
 pub struct ThreadPinnerConfig {
@@ -111,7 +112,6 @@ impl ThreadPinner {
         }
 
         if let Some(core_id) = self.core_ids.first() {
-            // Use cpu_set_t structure for sched_setaffinity
             let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
             unsafe {
                 libc::CPU_SET(*core_id, &mut cpuset);
@@ -132,6 +132,36 @@ impl ThreadPinner {
         false
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn pin_thread_by_index(&self, thread_index: usize) -> bool {
+        if !self.config.enabled || self.core_ids.is_empty() {
+            return false;
+        }
+
+        let core_id = self.core_ids[thread_index % self.core_ids.len()];
+
+        let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::CPU_SET(core_id, &mut cpuset);
+        }
+
+        let result =
+            unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset) };
+
+        if result == 0 {
+            tracing::debug!("Pinned thread {} to core {}", thread_index, core_id);
+            return true;
+        } else {
+            tracing::warn!(
+                "Failed to pin thread {} to core {}: {}",
+                thread_index,
+                core_id,
+                result
+            );
+            return false;
+        }
+    }
+
     #[cfg(not(target_os = "linux"))]
     pub fn pin_current_thread(&self) -> bool {
         if !self.config.enabled || self.core_ids.is_empty() {
@@ -140,6 +170,42 @@ impl ThreadPinner {
 
         tracing::warn!("Thread pinning not fully supported on this platform");
         false
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn pin_thread_by_index(&self, _thread_index: usize) -> bool {
+        if !self.config.enabled || self.core_ids.is_empty() {
+            return false;
+        }
+
+        tracing::warn!("Thread pinning not fully supported on this platform");
+        false
+    }
+
+    pub fn build_thread_pool(&self) -> Result<ThreadPool, Box<dyn std::error::Error>> {
+        let core_ids = self.core_ids.clone();
+        let enabled = self.config.enabled;
+
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(self.core_ids.len())
+            .spawn_handler(move |thread| {
+                let index = thread.index();
+                if enabled {
+                    let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+                    let core_id = core_ids[index % core_ids.len()];
+                    unsafe {
+                        libc::CPU_SET(core_id, &mut cpuset);
+                    }
+                    unsafe {
+                        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
+                    }
+                }
+                thread.run();
+                Ok(())
+            })
+            .build()?;
+
+        Ok(pool)
     }
 
     pub fn num_threads(&self) -> usize {
