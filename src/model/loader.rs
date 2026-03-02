@@ -59,6 +59,24 @@ impl Model {
 
         let mmap = unsafe { Mmap::map(&file)? };
 
+        // Apply madvise hints BEFORE reading tensor data so the kernel begins
+        // async read-ahead while candle's sequential seek+read_exact calls follow.
+        // Calling these after from_gguf() would be useless — data already read.
+        {
+            let ptr = mmap.as_ptr() as *mut std::ffi::c_void;
+            let size = mmap.len();
+            unsafe {
+                libc::madvise(ptr, size, libc::MADV_SEQUENTIAL);
+                #[cfg(target_os = "linux")]
+                libc::madvise(ptr, size, libc::MADV_HUGEPAGE);
+                libc::madvise(ptr, size, libc::MADV_WILLNEED);
+            }
+            tracing::info!(
+                "madvise hints applied ({} MB): SEQUENTIAL + HUGEPAGE + WILLNEED",
+                size / 1_000_000
+            );
+        }
+
         let mut cursor = Cursor::new(&mmap);
 
         let content = gguf_file::Content::read(&mut cursor)
@@ -94,28 +112,11 @@ impl Model {
         Ok((mmap, model))
     }
 
-    pub fn prefetch_mmap(mmap: &Mmap) {
-        let prefetch_mb = 1024;
-        let size = mmap.len();
-        let ptr = mmap.as_ptr() as *mut std::ffi::c_void;
-
-        unsafe {
-            libc::madvise(ptr, size, libc::MADV_SEQUENTIAL);
-
-            #[cfg(target_os = "linux")]
-            {
-                libc::madvise(ptr, size, libc::MADV_HUGEPAGE);
-            }
-
-            let prefetch_size = std::cmp::min(prefetch_mb * 1024 * 1024, size);
-            libc::madvise(ptr, prefetch_size, libc::MADV_WILLNEED);
-        }
-
-        tracing::info!(
-            "Prefetched {} MB of model data",
-            std::cmp::min(prefetch_mb, size / 1_000_000)
-        );
-    }
+    /// No-op. madvise hints are now applied inside `load_with_mmap()` immediately
+    /// after the mmap is created and before tensor data is read, which is the only
+    /// point where they have effect. Calling this after load returns is useless.
+    #[allow(unused_variables)]
+    pub fn prefetch_mmap(_mmap: &Mmap) {}
 
     fn extract_metadata(
         content: &gguf_file::Content,

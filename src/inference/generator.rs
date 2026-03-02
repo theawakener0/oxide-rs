@@ -20,28 +20,34 @@ pub struct Message {
     pub content: String,
 }
 
-#[derive(Clone)]
+/// Holds a pre-compiled minijinja environment so the template string is parsed
+/// and compiled exactly once at construction time, not on every generation call.
 pub struct ChatTemplate {
-    template_str: Option<String>,
+    /// `None` when no chat template was embedded in the GGUF file.
+    env: Option<Environment<'static>>,
 }
 
 impl ChatTemplate {
     pub fn new(template: Option<String>) -> Result<Self> {
-        Ok(Self {
-            template_str: template,
-        })
+        let env = match template {
+            None => None,
+            Some(src) => {
+                let mut e = Environment::new();
+                e.add_template_owned("chat".to_string(), src)?;
+                Some(e)
+            }
+        };
+        Ok(Self { env })
     }
 
     pub fn apply(&self, messages: &[Message]) -> Result<String> {
-        let template = match &self.template_str {
-            Some(t) => t,
+        let env = match &self.env {
+            Some(e) => e,
             None => {
                 anyhow::bail!("GGUF file has no chat_template. Use a model with embedded template.")
             }
         };
 
-        let mut env = Environment::new();
-        env.add_template("chat", template)?;
         let tmpl = env.get_template("chat")?;
         let rendered = tmpl.render(context! { messages => messages })?;
         Ok(rendered)
@@ -57,6 +63,9 @@ pub struct Generator {
     messages: Vec<Message>,
     system_prompt: Option<String>,
     token_history: Vec<u32>,
+    /// Reusable token buffer for the current generation call. Allocated once
+    /// with context_length capacity and cleared (not freed) between calls.
+    all_tokens: Vec<u32>,
     kv_cache: Option<PagedKvCache>,
     batch_size: usize,
 }
@@ -101,6 +110,7 @@ impl Generator {
         let logits_processor = LogitsProcessor::from_sampling(seed, sampling);
 
         let token_history = Vec::with_capacity(metadata.context_length);
+        let all_tokens = Vec::with_capacity(metadata.context_length);
 
         let kv_cache = Some(PagedKvCache::new(
             metadata.n_embd / metadata.n_layer,
@@ -117,6 +127,7 @@ impl Generator {
             messages: Vec::new(),
             system_prompt,
             token_history,
+            all_tokens,
             kv_cache,
             batch_size,
         })
@@ -335,19 +346,22 @@ impl Generator {
             None
         };
 
-        let mut all_tokens = Vec::with_capacity(self.metadata.context_length);
+        // Reuse the pre-allocated buffer instead of allocating context_length
+        // capacity (up to 128KB) on every call.
+        self.all_tokens.clear();
 
         if store_history {
             if let Some(excess) = excess {
                 if excess < self.token_history.len() {
-                    all_tokens.extend_from_slice(&self.token_history[excess..]);
+                    self.all_tokens
+                        .extend_from_slice(&self.token_history[excess..]);
                 }
             } else {
-                all_tokens.extend_from_slice(&self.token_history);
+                self.all_tokens.extend_from_slice(&self.token_history);
             }
         }
 
-        all_tokens.extend_from_slice(prompt_tokens);
+        self.all_tokens.extend_from_slice(prompt_tokens);
 
         let eos_token = self.tokenizer.eos_token_id();
 
@@ -366,7 +380,7 @@ impl Generator {
             prompt_start.elapsed().as_secs_f32()
         );
 
-        all_tokens.push(next_token);
+        self.all_tokens.push(next_token);
 
         // Handle first generated token
         let mut token_buffer: Vec<u32> = Vec::new();
@@ -384,18 +398,20 @@ impl Generator {
                 break;
             }
 
-            let logits = self.model.forward(&[next_token], all_tokens.len() - 1)?;
+            let logits = self
+                .model
+                .forward(&[next_token], self.all_tokens.len() - 1)?;
             let logits = logits.squeeze(0)?;
 
             let logits = if repeat_penalty != 1.0 {
-                let start_at = all_tokens.len().saturating_sub(repeat_last_n);
-                apply_repeat_penalty(&logits, repeat_penalty, &all_tokens[start_at..])?
+                let start_at = self.all_tokens.len().saturating_sub(repeat_last_n);
+                apply_repeat_penalty(&logits, repeat_penalty, &self.all_tokens[start_at..])?
             } else {
                 logits
             };
 
             next_token = self.logits_processor.sample(&logits)?;
-            all_tokens.push(next_token);
+            self.all_tokens.push(next_token);
             generated += 1;
 
             // Skip special tokens - use tokenizer's built-in detection
@@ -410,10 +426,6 @@ impl Generator {
                     }
                     token_buffer.clear();
                 }
-            }
-
-            if next_token == eos_token {
-                break;
             }
         }
 
@@ -453,12 +465,15 @@ impl Generator {
             String::new()
         } else {
             let response_start = history_len + prompt_tokens.len();
-            let response_tokens: Vec<u32> = all_tokens[response_start..].to_vec();
+            let response_tokens: Vec<u32> = self.all_tokens[response_start..].to_vec();
             self.tokenizer.decode(&response_tokens)?
         };
 
         if store_history {
-            self.token_history = all_tokens;
+            // Swap so token_history holds the full sequence and all_tokens is
+            // left with the old (now stale) history buffer, which will be
+            // cleared at the start of the next call.
+            std::mem::swap(&mut self.token_history, &mut self.all_tokens);
         }
 
         Ok(response)
@@ -475,14 +490,14 @@ impl Generator {
             return Ok(vec![]);
         }
 
-        let template = self.template.clone();
-        let system_prompt = self.system_prompt.clone();
-
-        let prompt_tokens_list: Vec<Vec<u32>> = prompts
+        // Build prompt texts first (borrows self.template + self.system_prompt),
+        // then encode in a separate pass (borrows self.tokenizer).
+        // This avoids needing to clone ChatTemplate, which no longer implements Clone.
+        let prompt_texts: Vec<String> = prompts
             .iter()
             .map(|prompt| {
                 let mut all_messages = Vec::new();
-                if let Some(ref sys) = system_prompt {
+                if let Some(ref sys) = self.system_prompt {
                     all_messages.push(Message {
                         role: "system".into(),
                         content: sys.clone(),
@@ -492,10 +507,13 @@ impl Generator {
                     role: "user".into(),
                     content: prompt.clone(),
                 });
-
-                let prompt_text = template.apply(&all_messages)?;
-                Ok::<_, anyhow::Error>(self.tokenizer.encode(&prompt_text)?)
+                self.template.apply(&all_messages)
             })
+            .collect::<Result<Vec<_>>>()?;
+
+        let prompt_tokens_list: Vec<Vec<u32>> = prompt_texts
+            .iter()
+            .map(|text| self.tokenizer.encode(text))
             .collect::<Result<Vec<_>>>()?;
 
         let mut results = Vec::with_capacity(prompts.len());

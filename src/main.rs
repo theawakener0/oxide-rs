@@ -130,7 +130,15 @@ fn main() -> Result<()> {
         );
     });
 
-    tracing::info!("Using {} threads for inference", num_threads);
+    // Set RAYON_NUM_THREADS before Generator::new() so candle's internal Rayon
+    // pool is right-sized from startup. Candle reads this env var in
+    // candle_core::utils::get_num_threads() when it first spawns its pool.
+    // Safety: single-threaded at this point — no other threads have been spawned yet.
+    unsafe { std::env::set_var("RAYON_NUM_THREADS", num_threads.to_string()) };
+    tracing::info!(
+        "Using {} threads for inference (RAYON_NUM_THREADS set)",
+        num_threads
+    );
 
     print_banner();
 
@@ -149,7 +157,9 @@ fn main() -> Result<()> {
         args.batch_size,
     ) {
         Ok(mut g) => {
-            if let Err(e) = g.warmup(128) {
+            // Run warmup on pinned threads so candle's Rayon ops use CPU-affine
+            // threads from the very first forward pass.
+            if let Err(e) = pinned_pool.install(|| g.warmup(128)) {
                 tracing::warn!("Model warmup failed: {}", e);
             }
             g
@@ -187,31 +197,33 @@ fn main() -> Result<()> {
         let context_used = gen_output.context_used();
         let mut prompt_token_count = 0usize;
 
-        gen_output.generate_streaming(
-            &prompt,
-            args.max_tokens,
-            args.repeat_penalty,
-            args.repeat_last_n,
-            |event| match event {
-                StreamEvent::PrefillStatus(count) => {
-                    prompt_token_count = count;
-                    stream.set_prompt_tokens(count);
-                    if thinking_spinner.is_none() {
-                        thinking_spinner = Some(ThinkingSpinner::new());
+        pinned_pool.install(|| {
+            gen_output.generate_streaming(
+                &prompt,
+                args.max_tokens,
+                args.repeat_penalty,
+                args.repeat_last_n,
+                |event| match event {
+                    StreamEvent::PrefillStatus(count) => {
+                        prompt_token_count = count;
+                        stream.set_prompt_tokens(count);
+                        if thinking_spinner.is_none() {
+                            thinking_spinner = Some(ThinkingSpinner::new());
+                        }
                     }
-                }
-                StreamEvent::Token(t) => {
-                    if let Some(spinner) = thinking_spinner.take() {
-                        spinner.stop();
+                    StreamEvent::Token(t) => {
+                        if let Some(spinner) = thinking_spinner.take() {
+                            spinner.stop();
+                        }
+                        stream.set_context(context_used, context_limit);
+                        stream.print_token(&t);
                     }
-                    stream.set_context(context_used, context_limit);
-                    stream.print_token(&t);
-                }
-                StreamEvent::Done => {
-                    stream.finish();
-                }
-            },
-        )?;
+                    StreamEvent::Done => {
+                        stream.finish();
+                    }
+                },
+            )
+        })?;
 
         return Ok(());
     }
@@ -220,10 +232,14 @@ fn main() -> Result<()> {
     print_welcome();
     print_divider();
 
-    interactive_mode(generator, args)
+    interactive_mode(generator, args, pinned_pool)
 }
 
-fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
+fn interactive_mode(
+    generator: Generator,
+    args: Args,
+    pinned_pool: rayon::ThreadPool,
+) -> Result<()> {
     let mut generator = generator;
     let mut prompt_display = PromptDisplay::new();
 
@@ -299,31 +315,35 @@ fn interactive_mode(generator: Generator, args: Args) -> Result<()> {
         let context_used = generator.context_used();
         let mut prompt_token_count = 0usize;
 
-        generator.generate_streaming(
-            &prompt,
-            args.max_tokens,
-            args.repeat_penalty,
-            args.repeat_last_n,
-            |event| match event {
-                StreamEvent::PrefillStatus(count) => {
-                    prompt_token_count = count;
-                    stream.set_prompt_tokens(count);
-                    if thinking_spinner.is_none() {
-                        thinking_spinner = Some(ThinkingSpinner::new());
+        // Run inference on CPU-pinned threads so candle's internal Rayon ops
+        // inherit the affinity and avoid cache-thrashing cross-core migrations.
+        pinned_pool.install(|| {
+            generator.generate_streaming(
+                &prompt,
+                args.max_tokens,
+                args.repeat_penalty,
+                args.repeat_last_n,
+                |event| match event {
+                    StreamEvent::PrefillStatus(count) => {
+                        prompt_token_count = count;
+                        stream.set_prompt_tokens(count);
+                        if thinking_spinner.is_none() {
+                            thinking_spinner = Some(ThinkingSpinner::new());
+                        }
                     }
-                }
-                StreamEvent::Token(t) => {
-                    if let Some(spinner) = thinking_spinner.take() {
-                        spinner.stop();
+                    StreamEvent::Token(t) => {
+                        if let Some(spinner) = thinking_spinner.take() {
+                            spinner.stop();
+                        }
+                        stream.set_context(context_used, context_limit);
+                        stream.print_token(&t);
                     }
-                    stream.set_context(context_used, context_limit);
-                    stream.print_token(&t);
-                }
-                StreamEvent::Done => {
-                    stream.finish();
-                }
-            },
-        )?;
+                    StreamEvent::Done => {
+                        stream.finish();
+                    }
+                },
+            )
+        })?;
 
         print_divider();
     }
