@@ -189,18 +189,30 @@ impl ThreadPinner {
         let pool = ThreadPoolBuilder::new()
             .num_threads(self.core_ids.len())
             .spawn_handler(move |thread| {
+                // Rayon's spawn_handler contract: spawn an OS thread, call
+                // thread.run() from INSIDE it, and return Ok(()) immediately.
+                // Calling thread.run() here (on the caller's thread) would block
+                // forever — the worker event loop never returns until pool drop.
                 let index = thread.index();
-                if enabled {
-                    let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-                    let core_id = core_ids[index % core_ids.len()];
-                    unsafe {
-                        libc::CPU_SET(core_id, &mut cpuset);
+                let core_ids_for_thread = core_ids.clone();
+                std::thread::Builder::new().spawn(move || {
+                    // sched_setaffinity(pid=0) pins the calling thread.
+                    // Must be called from inside the worker thread, not the
+                    // spawn handler thread.
+                    if enabled && !core_ids_for_thread.is_empty() {
+                        let core_id = core_ids_for_thread[index % core_ids_for_thread.len()];
+                        let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+                        unsafe {
+                            libc::CPU_SET(core_id, &mut cpuset);
+                            libc::sched_setaffinity(
+                                0,
+                                std::mem::size_of::<libc::cpu_set_t>(),
+                                &cpuset,
+                            );
+                        }
                     }
-                    unsafe {
-                        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
-                    }
-                }
-                thread.run();
+                    thread.run();
+                })?;
                 Ok(())
             })
             .build()?;
