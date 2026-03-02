@@ -122,8 +122,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut model = Model::new("model.gguf")
         .load()?;
 
-    // Warmup with 128 tokens (compiles compute kernels)
-    model.warmup(128)?;
+    // Minimal warmup (1 token) primes branch predictor (~50ms)
+    model.warmup(1)?;
 
     // First generation will be faster
     let response = model.generate("Hello!")?;

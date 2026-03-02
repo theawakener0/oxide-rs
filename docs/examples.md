@@ -174,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Batch Processing
+### Batch Processing (Sequential)
 
 ```rust
 use oxide_rs::Model;
@@ -198,6 +198,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print!("Q: {} ", prompt);
         let result = model.generate(prompt)?;
         println!("A: {}\n", result);
+    }
+
+    Ok(())
+}
+```
+
+### Batch Processing (Parallel)
+
+```rust
+use oxide_rs::Model;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let prompts = vec![
+        "What is 2+2?".to_string(),
+        "What is the capital of France?".to_string(),
+        "Who wrote Hamlet?".to_string(),
+    ];
+
+    let mut model = Model::new("model.gguf")
+        .with_options(oxide_rs::GenerateOptions {
+            max_tokens: 50,
+            temperature: 0.3,
+            ..Default::default()
+        })
+        .load()?;
+
+    // Process all prompts in a single batch call
+    let results = model.generate_batch(prompts)?;
+
+    for (prompt, response) in results.iter().enumerate() {
+        println!("Response {}: {}\n", prompt + 1, response);
     }
 
     Ok(())

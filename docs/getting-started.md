@@ -6,7 +6,7 @@ Oxide-rs is both a CLI tool and a Rust library for AI inference. This guide cove
 
 ### Prerequisites
 
-- Rust 1.70+ (2021 edition)
+- Rust 1.93+ (2021 edition)
 - A GGUF quantized model file with embedded chat template
 
 ### From crates.io (Library/CLI)
@@ -27,17 +27,7 @@ git clone https://github.com/theawakener0/oxide-rs.git
 cd oxide-rs
 
 # Build release binary
-make build
-
-# Or using cargo directly
 cargo build --release
-```
-
-### Install Locally
-
-```bash
-make install
-# Installs to ~/.local/bin/oxide-rs
 ```
 
 ### Install via Cargo (CLI)
@@ -63,10 +53,6 @@ oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
 ./target/release/oxide-rs --model ~/Models/model.gguf \
   --temperature 0.8 \
   --max-tokens 256
-
-# With performance tuning
-./target/release/oxide-rs --model ~/Models/model.gguf \
-  --batch-size 256
 ```
 
 ## Interactive Mode Commands
@@ -102,9 +88,11 @@ When running in interactive mode, you can use these commands:
 | `--top-p` | none | Top-p sampling |
 | `--repeat-penalty` | 1.1 | Repeat penalty |
 | `--repeat-last-n` | 64 | Context window for repeat penalty |
-| `--batch-size` | 128 | Batch size for warmup |
+| `--batch-size` | 128 | Warmup tokens (1 = minimal warmup) |
 | `--seed` | 299792458 | Random seed |
 | `--threads` | auto | Thread count |
+| `--reserve-cores` | 0 | Cores to reserve for OS |
+| `--simd-level` | auto | SIMD level (auto/avx512/avx2/neon/scalar) |
 | `-p, --prompt` | none | Input prompt |
 | `-o, --once` | false | Non-interactive mode |
 

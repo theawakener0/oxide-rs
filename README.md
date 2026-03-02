@@ -26,7 +26,7 @@
 - **Memory-Mapped Loading** — OS-managed paging for instant load times and lower memory usage
 - **Thread Pinning** — Configurable CPU thread management for consistent performance
 - **SIMD Runtime Detection** — Auto-detects AVX2/AVX-512/NEON for optimal performance
-- **Safe Thread Configuration** — Uses rayon ThreadPoolBuilder instead of unsafe env vars
+- **Thread Pinning** — CPU-affine thread pools for consistent performance
 - **Pre-allocated Buffers** — Zero-copy runtime allocations for smooth generation
 - **Tokenizer Caching** — Caches tokenizer to disk for faster subsequent loads
 - **Page Prefetching** — Preloads hot model pages into memory for faster first-token
@@ -39,7 +39,7 @@
 
 ### Prerequisites
 
-- Rust 1.70+ (2021 edition)
+- Rust 1.93+ (2021 edition)
 - A GGUF quantized model file with embedded chat template
 
 ### Build from Source
@@ -50,17 +50,7 @@ git clone https://github.com/theawakener0/oxide-rs.git
 cd oxide-rs
 
 # Build release binary
-make build
-
-# Or using cargo directly
 cargo build --release
-```
-
-### Install Locally
-
-```bash
-make install
-# Installs to ~/.local/bin/oxide-rs
 ```
 
 ### Install via Cargo
@@ -72,22 +62,7 @@ cargo install oxide-rs
 This installs the CLI to `~/.cargo/bin/oxide-rs`. Then run:
 
 ```bash
-oxide-rs -m model.gguf --once --prompt "Hello"
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL` | `~/Models/LFM2.5-1.2B-Instruct-Q4_K_M.gguf` | Path to GGUF model for `make run` |
-
-```bash
-# Set custom model path for make run
-export MODEL=~/Models/mistral-7b-v0.1.Q4_K_M.gguf
-make run
-
-# Or inline
-MODEL=~/Models/phi-3.Q4_K_M.gguf make run
+oxide-rs --model model.gguf --once --prompt "Hello"
 ```
 
 ## Quick Start
@@ -176,17 +151,15 @@ For more examples, see the [docs/](docs/) directory.
 | `--top-p` | *none* | Nucleus sampling threshold |
 | `--repeat-penalty` | `1.1` | Penalty for repeated tokens |
 | `--repeat-last-n` | `64` | Context window for repeat penalty |
-| `--batch-size` | `128` | Batch size for warmup/prefill |
-| `--max-batch-size` | `4` | Maximum batch size for dynamic batching |
-| `--batch-window-ms` | `1` | Time window (ms) for batching requests |
+| `--batch-size` | `128` | Number of tokens for warmup (1 = minimal warmup) |
+| `--max-batch-size` | `8` | Maximum batch size for dynamic batching |
+| `--batch-window-ms` | `100` | Time window (ms) for batching requests |
 | `--seed` | `299792458` | Random seed for reproducibility |
 | `--threads` | *auto* | Number of threads (0 = auto-detect n-1) |
 | `--reserve-cores` | `0` | Number of cores to reserve for OS |
 | `--simd-level` | `auto` | SIMD level (auto, avx512, avx2, neon, scalar) |
 | `-p, --prompt` | *none* | Input prompt (for one-shot mode) |
 | `-o, --once` | `false` | Run in non-interactive mode |
-
-For detailed documentation, see [CLI Reference](docs/cli-reference.md).
 
 ## Interactive Commands
 
@@ -374,22 +347,25 @@ sequenceDiagram
 
 ```bash
 # Development build (faster compile)
-make dev
+cargo build
 
-# Run with model (uses MODEL env var)
-make run
+# Run interactively
+cargo run --release -- --model ~/path/to/model.gguf
 
-# Or override MODEL inline
-make run MODEL=~/path/to/model.gguf
+# Run in one-shot mode
+cargo run --release -- --model ~/path/to/model.gguf --once --prompt "Hello"
 
 # Format code
-make fmt
+cargo fmt
 
 # Run linter
-make check
+cargo check
+
+# Run tests
+cargo test
 
 # Clean build artifacts
-make clean
+cargo clean
 ```
 
 ## Dependencies
@@ -419,12 +395,12 @@ make clean
 - **Parallel batch tokenization** — Multiple prompts tokenized concurrently
 - **Memory-efficient generation** — Reduced allocations per prompt
 - **Context caching** — Efficient multi-turn conversations with token history management
-- **Model warmup** — Pre-compiles compute kernels on startup for faster first-token generation
+- **Model warmup** — Minimal 1-token warmup primes branch predictor (~50ms)
 - **Smart defaults** — Temperature 0.3 for factual accuracy, default system prompt reduces hallucinations
-- **Thread pinning** — Configurable CPU core assignment for consistent performance
+- **Thread pinning** — CPU-affine thread pools for consistent performance
 - **SIMD runtime detection** — Auto-detects AVX2/AVX-512/NEON, uses optimal code paths
-- **Safe threading** — Rayon ThreadPoolBuilder for predictable thread management
 - **Tokenizer caching** — Disk cache for instant subsequent loads
+- **Memory-mapped loading** — OS-managed paging, madvise hints for read-ahead
 
 
 For more details, see [Performance Guide](docs/performance.md).

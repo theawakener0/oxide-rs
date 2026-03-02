@@ -67,7 +67,7 @@
 //!
 //! # Requirements
 //!
-//! - Rust 1.70+ (2021 edition)
+//! - Rust 1.93+ (2021 edition)
 //! - A GGUF quantized model file with embedded chat template
 //!
 //! # Links

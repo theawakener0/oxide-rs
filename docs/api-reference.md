@@ -48,8 +48,16 @@ pub struct GenerateOptions {
     pub top_k: Option<usize>,
     pub repeat_penalty: f32,
     pub repeat_last_n: usize,
+    pub batch_size: usize,
     pub seed: u64,
     pub system_prompt: Option<String>,
+    pub max_batch_size: usize,
+    pub batch_window_ms: u64,
+    pub enable_prefix_cache: bool,
+    pub cache_memory_mb: usize,
+    pub cpu_threads: usize,
+    pub reserve_cores: usize,
+    pub simd_level: String,
 }
 ```
 
@@ -63,10 +71,16 @@ pub struct GenerateOptions {
 | `top_k` | `Option<usize>` | `None` | Top-k sampling threshold |
 | `repeat_penalty` | `f32` | `1.1` | Penalty for repeated tokens (1.0 = no penalty) |
 | `repeat_last_n` | `usize` | `64` | Context window for repeat penalty |
-| `batch_size` | `usize` | `128` | Batch size for warmup/prefill |
-| `prefetch_size` | `usize` | `512` | Prefetch size in MB for model loading |
+| `batch_size` | `usize` | `128` | Number of tokens for warmup (1 = minimal) |
 | `seed` | `u64` | `299792458` | Random seed for reproducibility |
 | `system_prompt` | `Option<String>` | `None` | System prompt to prepend |
+| `max_batch_size` | `usize` | `8` | Maximum batch size for dynamic batching |
+| `batch_window_ms` | `u64` | `100` | Time window (ms) for batching requests |
+| `enable_prefix_cache` | `bool` | `true` | Enable prefix caching for faster TTFT |
+| `cache_memory_mb` | `usize` | `512` | Memory budget for prefix cache (MB) |
+| `cpu_threads` | `usize` | `0` | CPU threads (0 = auto-detect n-1) |
+| `reserve_cores` | `usize` | `0` | Cores to reserve for OS |
+| `simd_level` | `String` | `"auto"` | SIMD level (auto/avx512/avx2/neon/scalar) |
 
 **Example:**
 
@@ -80,10 +94,16 @@ let options = GenerateOptions {
     top_k: Some(40),
     repeat_penalty: 1.15,
     repeat_last_n: 64,
-    batch_size: 128,
-    prefetch_size: 512,
+    batch_size: 1,
     seed: 42,
     system_prompt: Some("You are a helpful assistant.".into()),
+    max_batch_size: 8,
+    batch_window_ms: 100,
+    enable_prefix_cache: true,
+    cache_memory_mb: 512,
+    cpu_threads: 0,
+    reserve_cores: 0,
+    simd_level: "auto".to_string(),
 };
 ```
 
@@ -392,8 +412,16 @@ impl Default for GenerateOptions {
             top_k: None,
             repeat_penalty: 1.1,
             repeat_last_n: 64,
+            batch_size: 128,
             seed: 299792458,
             system_prompt: None,
+            max_batch_size: 8,
+            batch_window_ms: 100,
+            enable_prefix_cache: true,
+            cache_memory_mb: 512,
+            cpu_threads: 0,
+            reserve_cores: 0,
+            simd_level: "auto".to_string(),
         }
     }
 }
