@@ -16,7 +16,7 @@ Oxide-rs is both a CLI tool and a Rust library for AI inference. This guide cove
 cargo add oxide-rs
 
 # Or add to Cargo.toml manually
-oxide-rs = "0.1.13"
+oxide-rs = "0.1.14"
 ```
 
 ### Build from Source
@@ -102,7 +102,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxide-rs = "0.1.13"
+oxide-rs = "0.1.14"
 ```
 
 ### Basic Usage
