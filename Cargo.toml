@@ -7,7 +7,7 @@ description = "AI Inference library and CLI in Rust - llama.cpp style"
 repository = "https://github.com/theawakener0/oxide-rs"
 keywords = ["llm", "inference", "gguf", "candle", "machine-learning"]
 categories = ["science", "command-line-utilities"]
-rust-version = "1.93"
+rust-version = "1.70"
 
 [dependencies]
 candle-core = "0.9"

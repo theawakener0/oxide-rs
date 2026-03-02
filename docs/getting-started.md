@@ -6,7 +6,7 @@ Oxide-rs is both a CLI tool and a Rust library for AI inference. This guide cove
 
 ### Prerequisites
 
-- Rust 1.93+ (2021 edition)
+- Rust 1.70+ (2021 edition)
 - A GGUF quantized model file with embedded chat template
 
 ### From crates.io (Library/CLI)
