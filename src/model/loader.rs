@@ -7,6 +7,8 @@ use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
 use candle_transformers::models::quantized_lfm2::ModelWeights as Lfm2Model;
 use candle_transformers::models::quantized_llama::ModelWeights as LlamaModel;
+use candle_transformers::models::quantized_qwen2::ModelWeights as Qwen2Model;
+use candle_transformers::models::quantized_qwen3::ModelWeights as Qwen3Model;
 use memmap2::Mmap;
 
 #[derive(Debug, Clone)]
@@ -25,6 +27,8 @@ pub struct GgufMetadata {
 pub enum ModelInner {
     Llama(LlamaModel),
     Lfm2(Lfm2Model),
+    Qwen2(Qwen2Model),
+    Qwen3(Qwen3Model),
 }
 
 pub struct Model {
@@ -100,6 +104,20 @@ impl Model {
             let weights = Lfm2Model::from_gguf(content, &mut cursor, &device)
                 .with_context(|| "Failed to load LFM2 model weights from GGUF")?;
             ModelInner::Lfm2(weights)
+        } else if arch == "qwen2" {
+            let weights = Qwen2Model::from_gguf(content, &mut cursor, &device)
+                .with_context(|| "Failed to load Qwen2 model weights from GGUF")?;
+            ModelInner::Qwen2(weights)
+        } else if arch == "qwen3" {
+            let weights = Qwen3Model::from_gguf(content, &mut cursor, &device)
+                .with_context(|| "Failed to load Qwen3 model weights from GGUF")?;
+            ModelInner::Qwen3(weights)
+        } else if arch == "qwen35" {
+            anyhow::bail!(
+                "Architecture 'qwen35' (Qwen3.5) is not yet supported. \
+                 Qwen3.5 uses a hybrid SSM+Attention architecture not implemented in candle 0.9. \
+                 Try a Qwen2.5 or Qwen3 model instead."
+            )
         } else {
             let weights = LlamaModel::from_gguf(content, &mut cursor, &device)
                 .with_context(|| "Failed to load LLaMA model weights from GGUF")?;
@@ -139,14 +157,16 @@ impl Model {
             .unwrap_or_else(|| filename.to_string());
 
         let find_key = |key_suffix: &str| -> Option<usize> {
+            let as_usize = |v: &gguf_file::Value| v.to_u64().ok().map(|n| n as usize);
+
             if let Some(v) = md.get(&format!("{}.{}", arch, key_suffix)) {
-                return v.to_u32().ok().map(|v| v as usize);
+                return as_usize(v);
             }
 
             for (k, v) in md.iter() {
                 if k.ends_with(&format!(".{}", key_suffix)) {
-                    if let Ok(val) = v.to_u32() {
-                        return Some(val as usize);
+                    if let Some(val) = as_usize(v) {
+                        return Some(val);
                     }
                 }
             }
@@ -206,7 +226,15 @@ impl Model {
             architecture: arch.clone(),
             n_layer: get_required("block_count")?,
             n_embd: get_required("embedding_length")?,
-            vocab_size: get_required("vocab_size")?,
+            vocab_size: find_key("vocab_size")
+                .or_else(|| {
+                    // Fallback: derive from tokenizer token list length.
+                    // Newer GGUF files (e.g. qwen35) omit the explicit vocab_size key.
+                    md.get("tokenizer.ggml.tokens")
+                        .and_then(|v| v.to_vec().ok())
+                        .map(|arr| arr.len())
+                })
+                .ok_or_else(|| anyhow::anyhow!("Missing metadata key: vocab_size"))?,
             context_length: get_optional("context_length", 4096),
             file_size,
             chat_template,
@@ -224,6 +252,8 @@ impl Model {
         let logits = match &mut self.inner {
             ModelInner::Llama(m) => m.forward(&input, pos)?,
             ModelInner::Lfm2(m) => m.forward(&input, pos)?,
+            ModelInner::Qwen2(m) => m.forward(&input, pos)?,
+            ModelInner::Qwen3(m) => m.forward(&input, pos)?,
         };
         Ok(logits)
     }
