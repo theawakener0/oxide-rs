@@ -11,6 +11,8 @@ use candle_transformers::models::quantized_qwen2::ModelWeights as Qwen2Model;
 use candle_transformers::models::quantized_qwen3::ModelWeights as Qwen3Model;
 use memmap2::Mmap;
 
+use crate::model::quantized_qwen35::ModelWeights as Qwen35Model;
+
 #[derive(Debug, Clone)]
 pub struct GgufMetadata {
     pub name: String,
@@ -29,6 +31,7 @@ pub enum ModelInner {
     Lfm2(Lfm2Model),
     Qwen2(Qwen2Model),
     Qwen3(Qwen3Model),
+    Qwen35(Qwen35Model),
 }
 
 pub struct Model {
@@ -113,11 +116,9 @@ impl Model {
                 .with_context(|| "Failed to load Qwen3 model weights from GGUF")?;
             ModelInner::Qwen3(weights)
         } else if arch == "qwen35" {
-            anyhow::bail!(
-                "Architecture 'qwen35' (Qwen3.5) is not yet supported. \
-                 Qwen3.5 uses a hybrid SSM+Attention architecture not implemented in candle 0.9. \
-                 Try a Qwen2.5 or Qwen3 model instead."
-            )
+            let weights = Qwen35Model::from_gguf(content, &mut cursor, &device)
+                .with_context(|| "Failed to load Qwen3.5 model weights from GGUF")?;
+            ModelInner::Qwen35(weights)
         } else {
             let weights = LlamaModel::from_gguf(content, &mut cursor, &device)
                 .with_context(|| "Failed to load LLaMA model weights from GGUF")?;
@@ -246,7 +247,18 @@ impl Model {
         &self.metadata
     }
 
+    pub fn clear_kv_cache(&mut self) {
+        match &mut self.inner {
+            ModelInner::Qwen3(m) => m.clear_kv_cache(),
+            ModelInner::Qwen35(m) => m.clear_kv_cache(),
+            ModelInner::Llama(_) | ModelInner::Lfm2(_) | ModelInner::Qwen2(_) => {}
+        }
+    }
+
     pub fn forward(&mut self, tokens: &[u32], pos: usize) -> Result<Tensor> {
+        if pos == 0 {
+            self.clear_kv_cache();
+        }
         let input = Tensor::new(tokens, &Device::Cpu)?.unsqueeze(0)?;
 
         let logits = match &mut self.inner {
@@ -254,6 +266,7 @@ impl Model {
             ModelInner::Lfm2(m) => m.forward(&input, pos)?,
             ModelInner::Qwen2(m) => m.forward(&input, pos)?,
             ModelInner::Qwen3(m) => m.forward(&input, pos)?,
+            ModelInner::Qwen35(m) => m.forward(&input, pos)?,
         };
         Ok(logits)
     }

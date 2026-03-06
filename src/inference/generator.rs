@@ -140,6 +140,7 @@ impl Generator {
     }
 
     pub fn clear_kv_cache(&mut self) {
+        self.model.clear_kv_cache();
         if let Some(ref mut cache) = self.kv_cache {
             cache.reset();
         }
@@ -173,6 +174,7 @@ impl Generator {
     pub fn clear_history(&mut self) {
         self.messages.clear();
         self.token_history.clear();
+        self.clear_kv_cache();
     }
 
     pub fn warmup(&mut self, num_warmup_tokens: usize) -> Result<()> {
