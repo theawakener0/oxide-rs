@@ -27,11 +27,23 @@ pub struct ChatTemplate {
     env: Option<Environment<'static>>,
 }
 
+fn normalize_chat_template(src: &str) -> String {
+    src.replace(
+        "content.startswith('<tool_response>') and content.endswith('</tool_response>')",
+        "(content[:15] == '<tool_response>') and (content[-16:] == '</tool_response>')",
+    )
+    .replace(
+        "content.starts_with('<tool_response>') and content.ends_with('</tool_response>')",
+        "(content[:15] == '<tool_response>') and (content[-16:] == '</tool_response>')",
+    )
+}
+
 impl ChatTemplate {
     pub fn new(template: Option<String>) -> Result<Self> {
         let env = match template {
             None => None,
             Some(src) => {
+                let src = normalize_chat_template(&src);
                 let mut e = Environment::new();
                 e.add_template_owned("chat".to_string(), src)?;
                 Some(e)
