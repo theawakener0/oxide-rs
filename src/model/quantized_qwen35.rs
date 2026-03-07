@@ -615,7 +615,17 @@ impl ModelWeights {
             .metadata()
             .get("qwen35.rope.dimension_sections")
             .and_then(|v| v.to_vec().ok())
-            .map(|vals| vals.iter().filter_map(|v| v.to_u64().ok()).sum::<u64>() as usize * 2)
+            .map(|vals| {
+                vals.iter()
+                    .filter_map(|v| {
+                        v.to_u64()
+                            .ok()
+                            .map(|n| n as usize)
+                            .or_else(|| v.to_i32().ok().map(|n| n.max(0) as usize))
+                    })
+                    .sum::<usize>()
+                    * 2
+            })
             .unwrap_or(head_dim / 4);
 
         let dtype = match gg.metadata().get("general.dtype") {
