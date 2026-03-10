@@ -4,5 +4,8 @@
 # tmp
 /tmp
 
+# bin
+src/bin
+
 # it is big
 /benches/target
