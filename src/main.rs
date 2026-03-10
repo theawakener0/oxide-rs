@@ -150,10 +150,9 @@ fn handle_download(repo_id: &str) -> Result<()> {
     print_divider();
     println!();
 
-    let spinner = oxide_rs::cli::Spinner::new("Fetching model info...");
+    println!("  Fetching model info...");
 
     let info = get_model_info(repo_id)?;
-    spinner.finish();
 
     let gguf_file = find_gguf_file(&info.files).ok_or_else(|| {
         anyhow::anyhow!(
@@ -225,10 +224,9 @@ fn handle_list_models() -> Result<()> {
 
 fn handle_info(repo_id: &str) -> Result<()> {
     println!();
-    let spinner = oxide_rs::cli::Spinner::new("Fetching model info...");
+    println!("  Fetching model info...");
 
     let info = get_model_info(repo_id)?;
-    spinner.finish();
 
     println!();
     print_banner();
