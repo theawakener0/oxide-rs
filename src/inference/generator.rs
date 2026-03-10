@@ -61,7 +61,12 @@ impl ChatTemplate {
         };
 
         let tmpl = env.get_template("chat")?;
-        let rendered = tmpl.render(context! { messages => messages })?;
+        let rendered = tmpl.render(context! {
+            messages => messages,
+            add_generation_prompt => true,
+            enable_thinking => false,
+            add_vision_id => false,
+        })?;
         Ok(rendered)
     }
 }
@@ -238,7 +243,7 @@ impl Generator {
         // Serialize, which needs owned values).
         let owned: Vec<Message> = all_messages.into_iter().cloned().collect();
         let prompt_text = self.template.apply(&owned)?;
-        let prompt_tokens = self.tokenizer.encode(&prompt_text)?;
+        let prompt_tokens = self.tokenizer.encode_raw(&prompt_text)?;
 
         let total_len = self.token_history.len() + prompt_tokens.len() + max_tokens;
         if total_len > self.metadata.context_length {
@@ -503,7 +508,7 @@ impl Generator {
 
         let prompt_tokens_list: Vec<Vec<u32>> = prompt_texts
             .iter()
-            .map(|text| self.tokenizer.encode(text))
+            .map(|text| self.tokenizer.encode_raw(text))
             .collect::<Result<Vec<_>>>()?;
 
         let mut results = Vec::with_capacity(prompts.len());

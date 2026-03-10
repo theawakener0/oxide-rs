@@ -133,6 +133,12 @@ impl TokenizerWrapper {
             .map_err(|e| anyhow::anyhow!("Encode failed: {}", e))
     }
 
+    pub fn encode_raw(&self, text: &str) -> Result<Vec<u32>> {
+        self.inner
+            .encode(text, false)
+            .map_err(|e| anyhow::anyhow!("Encode failed: {}", e))
+    }
+
     pub fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<u32>>> {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {

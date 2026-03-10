@@ -58,8 +58,9 @@ impl GatedRmsNorm {
         let x = x.to_dtype(internal_dtype)?;
         let norm_x = (x.sqr()?.sum_keepdim(D::Minus1)? / hidden as f64)?;
         let x = x.broadcast_div(&(norm_x + self.eps)?.sqrt()?)?;
-        let x = x.to_dtype(x_dtype)?.broadcast_mul(&self.weight)?;
-        x.broadcast_mul(&candle_nn::ops::silu(gate)?)
+        let gate = candle_nn::ops::silu(&gate.to_dtype(DType::F32)?)?;
+        let x = x.broadcast_mul(&self.weight.to_dtype(DType::F32)?)?;
+        x.broadcast_mul(&gate)?.to_dtype(x_dtype)
     }
 }
 
@@ -164,8 +165,8 @@ fn repeat_heads(xs: &Tensor, n_rep: usize) -> Result<Tensor> {
         return Ok(xs.clone());
     }
     let (b, l, h, d) = xs.dims4()?;
-    let refs: Vec<&Tensor> = std::iter::repeat(xs).take(n_rep).collect();
-    Tensor::cat(&refs, 2)?.reshape((b, l, h * n_rep, d))
+    let expanded = xs.unsqueeze(3)?.broadcast_as((b, l, h, n_rep, d))?;
+    expanded.reshape((b, l, h * n_rep, d))
 }
 
 #[derive(Debug, Clone)]
@@ -406,9 +407,10 @@ impl SsmWeights {
         let current = mixed_qkv.contiguous()?;
         let conv_out = if let Some(prev_state) = &self.conv_state {
             let full = Tensor::cat(&[prev_state, &current], 2)?;
+            let window = full.narrow(2, 1, self.conv_kernel)?;
             let weight = self.conv_weight.unsqueeze(0)?;
-            let out = full.broadcast_mul(&weight)?.sum_keepdim(2)?;
-            self.conv_state = Some(full.narrow(2, 1, self.conv_kernel - 1)?);
+            let out = window.broadcast_mul(&weight)?.sum_keepdim(2)?;
+            self.conv_state = Some(window);
             out
         } else {
             let left = Tensor::zeros(
@@ -419,7 +421,7 @@ impl SsmWeights {
             let full = Tensor::cat(&[&left, &current], 2)?;
             let weight = self.conv_weight.unsqueeze(0)?;
             let out = full.broadcast_mul(&weight)?.sum_keepdim(2)?;
-            self.conv_state = Some(full.narrow(2, 1, self.conv_kernel - 1)?);
+            self.conv_state = Some(full);
             out
         };
         let mixed_qkv = candle_nn::ops::silu(&conv_out)?.transpose(1, 2)?;
@@ -440,7 +442,7 @@ impl SsmWeights {
         let query = l2_norm(&query, 1e-6)?;
         let key = l2_norm(&key, 1e-6)?;
         let rep = self.num_v_heads / self.num_k_heads;
-        let query = repeat_heads(&query, rep)?;
+        let query = (repeat_heads(&query, rep)? * (1f64 / (self.head_k_dim as f64).sqrt()))?;
         let key = repeat_heads(&key, rep)?;
         let g_base = self.ssm_a.exp()?.neg()?;
         let g = g_base.broadcast_mul(&softplus(&(a.to_dtype(DType::F32)? + &self.dt_bias)?)?)?;
@@ -448,7 +450,7 @@ impl SsmWeights {
         let query = query.squeeze(1)?;
         let key = key.squeeze(1)?;
         let value = value.squeeze(1)?;
-        let beta = beta.squeeze(1)?;
+        let beta = beta.squeeze(1)?.to_dtype(DType::F32)?;
         let g = g.squeeze(1)?.exp()?;
 
         let mut state = match &self.recurrent_state {

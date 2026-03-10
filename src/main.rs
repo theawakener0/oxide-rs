@@ -13,8 +13,6 @@ use oxide_rs::inference::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful, honest, and accurate AI assistant. If you don't know something, say so clearly. Do not make up information or hallucinate facts.";
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -133,10 +131,7 @@ fn main() -> Result<()> {
         args.seed,
         args.batch_size,
     );
-    let system_prompt = args
-        .system
-        .clone()
-        .or_else(|| Some(DEFAULT_SYSTEM_PROMPT.to_string()));
+    let system_prompt = args.system.clone();
 
     let load_handle = std::thread::spawn(move || {
         Generator::new(
