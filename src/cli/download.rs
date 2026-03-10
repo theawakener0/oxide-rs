@@ -15,19 +15,17 @@ use crate::cli::theme::Theme;
 use crate::model::download::{format_size, DownloadProgress};
 
 const DOWNLOAD_FRAMES: &[&str] = &[
-    "⬇ 🦀      ",
-    "⬇  🦀     ",
-    "⬇   🦀    ",
-    "⬇    🦀   ",
-    "⬇     🦀  ",
-    "⬇      🦀 ",
-    "⬇       🦀",
-    "⬇      🦀 ",
-    "⬇     🦀  ",
-    "⬇    🦀   ",
+    "⬇       ",
+    "⬇  ⣀   ",
+    "⬇ ⣀ ⣀  ",
+    "⬇ ⣀ ⣀ ⣀",
+    "⬇ ⣀ ⣀ ⣀",
+    "⬇ ⣀ ⣀  ",
+    "⬇  ⣀   ",
+    "⬇       ",
 ];
 
-const SPINNER_FRAMES: &[&str] = &["◐ 🦀", "◑ 🦀", "◒ 🦀", "◓ 🦀", "◑ 🦀", "◐ 🦀"];
+const SPINNER_FRAMES: &[&str] = &["◐", "◑", "◒", "◓", "◑", "◐"];
 
 pub struct DownloadProgressBar {
     running: Arc<AtomicBool>,
