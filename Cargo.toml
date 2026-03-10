@@ -27,7 +27,11 @@ num_cpus = "1.16"
 sha2 = "0.10"
 libc = "0.2"
 rayon = "1.10"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "io-util"] }
+hf-hub = "0.5"
+dirs = "6"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["blocking"] }
 
 [profile.release]
 opt-level = 3

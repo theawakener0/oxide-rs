@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
+use oxide_rs::cli::download::DownloadProgressBar;
 use oxide_rs::cli::{
     print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
     StreamOutput, ThinkingSpinner,
@@ -11,14 +12,34 @@ use oxide_rs::inference::{
     init_simd, init_thread_pinner, simd_dispatch::SimdLevel, thread_pinner::ThreadPinnerConfig,
     Generator, StreamEvent,
 };
+use oxide_rs::model::download::find_gguf_file;
+use oxide_rs::model::{
+    download_model, format_size, get_model_info, list_models, register_model, unregister_model,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+struct Cli {
+    /// Download a model from HuggingFace Hub
+    #[arg(short, long)]
+    download: Option<String>,
+
+    /// List all locally downloaded models
+    #[arg(short, long)]
+    models: bool,
+
+    /// Show information about a model on HuggingFace Hub
+    #[arg(long)]
+    info: Option<String>,
+
+    /// Remove a model from local storage
+    #[arg(long)]
+    remove: Option<String>,
+
     /// Path to GGUF model file
     #[arg(short, long)]
-    model: PathBuf,
+    model: Option<PathBuf>,
 
     /// Path to tokenizer.json (optional, will extract from GGUF if not provided)
     #[arg(short, long)]
@@ -94,14 +115,189 @@ fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let args = Args::parse();
+    let cli = Cli::parse();
 
+    if let Some(repo_id) = &cli.download {
+        handle_download(repo_id)?;
+        return Ok(());
+    }
+
+    if cli.models {
+        handle_list_models()?;
+        return Ok(());
+    }
+
+    if let Some(repo_id) = &cli.info {
+        handle_info(repo_id)?;
+        return Ok(());
+    }
+
+    if let Some(model_id) = &cli.remove {
+        handle_remove(model_id)?;
+        return Ok(());
+    }
+
+    let model_path = cli.model.clone().ok_or_else(|| {
+        anyhow::anyhow!("No model specified. Use --model or --download to get a model.")
+    })?;
+
+    run_inference(cli, model_path)
+}
+
+fn handle_download(repo_id: &str) -> Result<()> {
+    println!();
+    print_banner();
+    print_divider();
+    println!();
+
+    let spinner = oxide_rs::cli::Spinner::new("Fetching model info...");
+
+    let info = get_model_info(repo_id)?;
+    spinner.finish();
+
+    let gguf_file = find_gguf_file(&info.files).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No GGUF file found in repository. This model may not have GGUF files available."
+        )
+    })?;
+
+    println!();
+    println!("  Repository: {}", repo_id);
+    println!("  File:       {}", gguf_file.rfilename);
+    println!("  Size:       {}", format_size(gguf_file.size));
+    println!();
+    print_divider();
+    println!();
+
+    let progress_bar = DownloadProgressBar::new(&gguf_file.rfilename, gguf_file.size);
+
+    let (path, filename): (std::path::PathBuf, String) =
+        download_model(repo_id, Some(&gguf_file.rfilename), |progress| {
+            progress_bar.update(&progress);
+        })?;
+
+    progress_bar.finish(path.to_str().unwrap_or(""));
+
+    let entry = register_model(repo_id, &filename, path.clone(), gguf_file.size)?;
+
+    println!("  Model ID:   {}", entry.id);
+    println!();
+    println!("  Run with:    oxide-rs --model {}", path.display());
+
+    Ok(())
+}
+
+fn handle_list_models() -> Result<()> {
+    let models = list_models()?;
+
+    println!();
+    print_banner();
+    println!();
+
+    if models.is_empty() {
+        println!("  No models downloaded yet.");
+        println!();
+        println!("  Download a model with:");
+        println!("    oxide-rs --download <repo-id>");
+        println!();
+        return Ok(());
+    }
+
+    println!("  📦 Local Models");
+    print_divider();
+
+    for model in &models {
+        let size_str = format_size(model.size_bytes);
+        let quant = model.quantization.as_deref().unwrap_or("Unknown");
+        println!("  {}", model.id);
+        println!("    Size:     {}", size_str);
+        println!("    Quant:    {}", quant);
+        println!("    Path:     {}", model.path.display());
+        println!();
+    }
+
+    println!("  Run a model:");
+    println!("    oxide-rs --model <path>");
+    println!();
+
+    Ok(())
+}
+
+fn handle_info(repo_id: &str) -> Result<()> {
+    println!();
+    let spinner = oxide_rs::cli::Spinner::new("Fetching model info...");
+
+    let info = get_model_info(repo_id)?;
+    spinner.finish();
+
+    println!();
+    print_banner();
+    println!();
+
+    println!("  Repository: {}", info.repo_id);
+    println!("  Files:      {}", info.files.len());
+    println!("  Total Size: {}", format_size(info.total_size));
+    println!();
+
+    let gguf_files: Vec<_> = info
+        .files
+        .iter()
+        .filter(|f| f.rfilename.ends_with(".gguf"))
+        .collect();
+
+    if !gguf_files.is_empty() {
+        println!("  GGUF Files:");
+        for file in &gguf_files {
+            println!("    • {} ({})", file.rfilename, format_size(file.size));
+        }
+        println!();
+
+        if let Some(best) = find_gguf_file(&info.files) {
+            println!(
+                "  Recommended: {} ({})",
+                best.rfilename,
+                format_size(best.size)
+            );
+        }
+    } else {
+        println!("  All Files:");
+        for file in &info.files {
+            println!("    • {} ({})", file.rfilename, format_size(file.size));
+        }
+    }
+
+    println!();
+    println!("  Download with:");
+    println!("    oxide-rs --download {}", repo_id);
+    println!();
+
+    Ok(())
+}
+
+fn handle_remove(model_id: &str) -> Result<()> {
+    if let Some(entry) = unregister_model(model_id)? {
+        println!();
+        println!("  ✓ Removed model: {}", entry.id);
+        println!("    File: {}", entry.path.display());
+        println!();
+    } else {
+        println!();
+        println!("  Model not found: {}", model_id);
+        println!();
+        println!("  Use 'oxide-rs --models' to see available models.");
+        println!();
+    }
+
+    Ok(())
+}
+
+fn run_inference(cli: Cli, model_path: PathBuf) -> Result<()> {
     let num_cpus = num_cpus::get();
-    let num_threads = args
+    let num_threads = cli
         .threads
         .unwrap_or_else(|| num_cpus.saturating_sub(1).max(1));
 
-    let simd_level = SimdLevel::from_str(&args.simd);
+    let simd_level = SimdLevel::from_str(&cli.simd);
     let simd = init_simd(simd_level);
     tracing::info!(
         "SIMD: {:?} (AVX512: {}, AVX2: {}, NEON: {})",
@@ -111,27 +307,21 @@ fn main() -> Result<()> {
         simd.cpu_features.has_neon
     );
 
-    // Set RAYON_NUM_THREADS before spawning the loading thread so candle's
-    // Rayon pool initializes with the right thread count on first use.
-    // Safety: no other threads are alive yet at this point.
     unsafe { std::env::set_var("RAYON_NUM_THREADS", num_threads.to_string()) };
     tracing::info!(
         "Using {} threads for inference (RAYON_NUM_THREADS set)",
         num_threads
     );
 
-    // Spawn model loading in the background immediately so it overlaps with
-    // thread pool setup and banner display below.
-    let model_path = args.model.clone();
-    let tokenizer_path = args.tokenizer.clone();
+    let tokenizer_path = cli.tokenizer.clone();
     let (temperature, top_p, top_k, seed, batch_size) = (
-        args.temperature,
-        args.top_p,
-        args.top_k,
-        args.seed,
-        args.batch_size,
+        cli.temperature,
+        cli.top_p,
+        cli.top_k,
+        cli.seed,
+        cli.batch_size,
     );
-    let system_prompt = args.system.clone();
+    let system_prompt = cli.system.clone();
 
     let load_handle = std::thread::spawn(move || {
         Generator::new(
@@ -146,7 +336,6 @@ fn main() -> Result<()> {
         )
     });
 
-    // Build pinned thread pool while the model loads in the background.
     let thread_pinner = init_thread_pinner(ThreadPinnerConfig::auto(num_cpus));
     tracing::info!(
         "Thread pinning: {} threads on cores {:?}",
@@ -164,13 +353,10 @@ fn main() -> Result<()> {
         );
     });
 
-    // Banner renders instantly (no animation delays) — happens while model loads.
     print_banner();
 
-    // Spinner starts here; model loading is already in progress.
     let loader = ModelLoader::new();
 
-    // Wait for model loading to complete.
     let mut generator = match load_handle.join() {
         Ok(Ok(g)) => g,
         Ok(Err(e)) => {
@@ -183,9 +369,6 @@ fn main() -> Result<()> {
         }
     };
 
-    // Single-token warmup: primes the branch predictor and allocator hot paths
-    // with negligible cost (~50ms). 128-token warmup was removed — its page-cache
-    // benefit is now covered by the madvise(WILLNEED) applied during mmap setup.
     if let Err(e) = pinned_pool.install(|| generator.warmup(1)) {
         tracing::warn!("Model warmup failed: {}", e);
     }
@@ -202,8 +385,8 @@ fn main() -> Result<()> {
         metadata.context_length,
     );
 
-    if args.once {
-        let prompt = args
+    if cli.once {
+        let prompt = cli
             .prompt
             .unwrap_or_else(|| "Write a hello world program in Rust".to_string());
 
@@ -220,9 +403,9 @@ fn main() -> Result<()> {
         pinned_pool.install(|| {
             gen_output.generate_streaming(
                 &prompt,
-                args.max_tokens,
-                args.repeat_penalty,
-                args.repeat_last_n,
+                cli.max_tokens,
+                cli.repeat_penalty,
+                cli.repeat_last_n,
                 |event| match event {
                     StreamEvent::PrefillStatus(count) => {
                         prompt_token_count = count;
@@ -252,14 +435,10 @@ fn main() -> Result<()> {
     print_welcome();
     print_divider();
 
-    interactive_mode(generator, args, pinned_pool)
+    interactive_mode(generator, cli, pinned_pool)
 }
 
-fn interactive_mode(
-    generator: Generator,
-    args: Args,
-    pinned_pool: rayon::ThreadPool,
-) -> Result<()> {
+fn interactive_mode(generator: Generator, cli: Cli, pinned_pool: rayon::ThreadPool) -> Result<()> {
     let mut generator = generator;
     let mut prompt_display = PromptDisplay::new();
 
@@ -322,9 +501,9 @@ fn interactive_mode(
             println!("  Layers:    {}", meta.n_layer);
             println!("  Embedding: {}", meta.n_embd);
             println!("  Vocab:     {}", meta.vocab_size);
-            println!("  Temp:      {}", args.temperature);
-            println!("  Max Tok:   {}", args.max_tokens);
-            println!("  Seed:      {}", args.seed);
+            println!("  Temp:      {}", cli.temperature);
+            println!("  Max Tok:   {}", cli.max_tokens);
+            println!("  Seed:      {}", cli.seed);
             println!();
             continue;
         }
@@ -335,14 +514,12 @@ fn interactive_mode(
         let context_used = generator.context_used();
         let mut prompt_token_count = 0usize;
 
-        // Run inference on CPU-pinned threads so candle's internal Rayon ops
-        // inherit the affinity and avoid cache-thrashing cross-core migrations.
         pinned_pool.install(|| {
             generator.generate_streaming(
                 &prompt,
-                args.max_tokens,
-                args.repeat_penalty,
-                args.repeat_last_n,
+                cli.max_tokens,
+                cli.repeat_penalty,
+                cli.repeat_last_n,
                 |event| match event {
                     StreamEvent::PrefillStatus(count) => {
                         prompt_token_count = count;
@@ -369,18 +546,6 @@ fn interactive_mode(
     }
 
     Ok(())
-}
-
-fn format_size(size: u64) -> String {
-    if size < 1_000 {
-        format!("{}B", size)
-    } else if size < 1_000_000 {
-        format!("{:.1}KB", size as f64 / 1e3)
-    } else if size < 1_000_000_000 {
-        format!("{:.1}MB", size as f64 / 1e6)
-    } else {
-        format!("{:.1}GB", size as f64 / 1e9)
-    }
 }
 
 fn format_token_count(n: usize) -> String {

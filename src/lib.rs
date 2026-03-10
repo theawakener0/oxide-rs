@@ -88,7 +88,11 @@ pub use inference::{
     PrefixCache, PrefixCacheConfig, SimdLevel, StreamEvent,
     ThreadPinnerConfig, ThreadPinner,
 };
-pub use model::{GgufMetadata, Model as ModelWrapper, TokenizerWrapper};
+pub use model::{
+    download, format_size, get_hf_cache_dir, get_model_info, list_models, list_repo_files,
+    register_model, unregister_model, ModelEntry, GgufMetadata, Model as ModelWrapper, 
+    TokenizerWrapper,
+};
 
 /// Configuration options for text generation.
 ///
