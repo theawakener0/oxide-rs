@@ -35,10 +35,9 @@ pub struct DownloadProgressBar {
 }
 
 impl DownloadProgressBar {
-    pub fn new(filename: &str, total_size: u64) -> Self {
+    pub fn new(filename: &str, _total_size: u64) -> Self {
         let running = Arc::new(AtomicBool::new(true));
-        let filename = filename.to_string();
-        let _total = total_size;
+        let filename_for_thread = filename.to_string();
 
         let handle = thread::spawn({
             let running = running.clone();
@@ -62,7 +61,7 @@ impl DownloadProgressBar {
                         ResetColor,
                         Print(" "),
                         SetForegroundColor(Theme::TEXT_PRIMARY),
-                        Print(&filename),
+                        Print(&filename_for_thread),
                         ResetColor
                     )
                     .ok();
@@ -80,7 +79,12 @@ impl DownloadProgressBar {
         }
     }
 
-    pub fn update(&self, progress: &DownloadProgress) {
+    pub fn update(&mut self, progress: &DownloadProgress) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            h.join().ok();
+        }
+
         let percentage = if progress.total_bytes > 0 {
             (progress.bytes_downloaded as f64 / progress.total_bytes as f64 * 100.0) as u32
         } else {
@@ -130,6 +134,43 @@ impl DownloadProgressBar {
         )
         .ok();
         stdout.flush().ok();
+
+        self.running = Arc::new(AtomicBool::new(true));
+        let filename = progress.filename.clone();
+        let running = self.running.clone();
+
+        self.handle = Some(thread::spawn({
+            move || {
+                let mut stdout = io::stdout();
+                let mut i = 0usize;
+
+                loop {
+                    if !running.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    let frame = DOWNLOAD_FRAMES[i % DOWNLOAD_FRAMES.len()];
+
+                    execute!(
+                        stdout,
+                        MoveToColumn(0),
+                        Clear(ClearType::CurrentLine),
+                        SetForegroundColor(Theme::RUST_ORANGE),
+                        Print(frame),
+                        ResetColor,
+                        Print(" "),
+                        SetForegroundColor(Theme::TEXT_PRIMARY),
+                        Print(&filename),
+                        ResetColor
+                    )
+                    .ok();
+
+                    stdout.flush().ok();
+                    thread::sleep(Duration::from_millis(80));
+                    i = i.wrapping_add(1);
+                }
+            }
+        }));
     }
 
     pub fn finish(mut self, path: &str) {

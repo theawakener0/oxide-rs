@@ -169,7 +169,7 @@ fn handle_download(repo_id: &str) -> Result<()> {
     print_divider();
     println!();
 
-    let progress_bar = DownloadProgressBar::new(&gguf_file.rfilename, gguf_file.size);
+    let mut progress_bar = DownloadProgressBar::new(&gguf_file.rfilename, gguf_file.size);
 
     let (path, filename): (std::path::PathBuf, String) =
         download_model(repo_id, Some(&gguf_file.rfilename), |progress| {
