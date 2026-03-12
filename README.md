@@ -1,8 +1,6 @@
 # oxide-rs
 
-CPU-only GGUF LLM inference in Rust.
-
-Oxide is a small local inference CLI and library built with Candle, inspired by llama.cpp.
+A high-performance, memory-safe, and lightweight LLM inference engine written in pure Rust. Optimized for CPU-based inference and inspired by the efficiency of llama.cpp. 
 
 ## Why oxide-rs
 
@@ -113,4 +111,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
