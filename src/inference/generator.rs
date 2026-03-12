@@ -27,6 +27,126 @@ pub struct ChatTemplate {
     env: Option<Environment<'static>>,
 }
 
+const STRIP_SEQUENCES: &[&str] = &[
+    "<|im_start|>assistant",
+    "<|im_start|>system",
+    "<|im_start|>user",
+    "</|im_start|>",
+    "</|im_str>",
+    "<|im_str|>",
+    "<|im_start|>",
+    "<|start|>",
+    "<|sep|>",
+    "<s>",
+    "<pad>",
+];
+
+const STOP_SEQUENCES: &[&str] = &["<|im_end|>", "<|end|>", "</s>"];
+
+#[derive(Debug, Default)]
+struct ResponseProcessor {
+    buffer: String,
+}
+
+#[derive(Debug, Default)]
+struct ProcessedChunk {
+    text: String,
+    should_stop: bool,
+}
+
+impl ResponseProcessor {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    fn push(&mut self, chunk: &str) -> ProcessedChunk {
+        self.buffer.push_str(chunk);
+        strip_full_sequences(&mut self.buffer);
+
+        if let Some(stop_idx) = earliest_sequence_index(&self.buffer, STOP_SEQUENCES) {
+            let text = strip_inline_sequences(&self.buffer[..stop_idx]);
+            self.buffer.clear();
+            return ProcessedChunk {
+                text,
+                should_stop: true,
+            };
+        }
+
+        let keep_len = trailing_partial_match_len(&self.buffer);
+        let safe_len = self.buffer.len().saturating_sub(keep_len);
+        let safe_len = floor_char_boundary(&self.buffer, safe_len);
+
+        if safe_len == 0 {
+            return ProcessedChunk::default();
+        }
+
+        let text = strip_inline_sequences(&self.buffer[..safe_len]);
+        self.buffer.drain(..safe_len);
+
+        ProcessedChunk {
+            text,
+            should_stop: false,
+        }
+    }
+
+    fn finish(&mut self) -> String {
+        strip_full_sequences(&mut self.buffer);
+        let text = strip_inline_sequences(&self.buffer);
+        self.buffer.clear();
+        text
+    }
+}
+
+fn trailing_partial_match_len(input: &str) -> usize {
+    STRIP_SEQUENCES
+        .iter()
+        .chain(STOP_SEQUENCES.iter())
+        .map(|pattern| {
+            let max_len = input.len().min(pattern.len().saturating_sub(1));
+            (1..=max_len)
+                .rev()
+                .find(|&len| input.ends_with(&pattern[..len]))
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn earliest_sequence_index(input: &str, patterns: &[&str]) -> Option<usize> {
+    patterns.iter().filter_map(|p| input.find(p)).min()
+}
+
+fn strip_inline_sequences(input: &str) -> String {
+    let mut result = input.to_string();
+    for pattern in STRIP_SEQUENCES {
+        result = result.replace(pattern, "");
+    }
+    result
+}
+
+fn strip_full_sequences(buffer: &mut String) {
+    loop {
+        let mut next = buffer.clone();
+        for pattern in STRIP_SEQUENCES {
+            next = next.replace(pattern, "");
+        }
+        if next == *buffer {
+            break;
+        }
+        *buffer = next;
+    }
+}
+
+fn floor_char_boundary(input: &str, mut idx: usize) -> usize {
+    idx = idx.min(input.len());
+    while idx > 0 && !input.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 fn normalize_chat_template(src: &str) -> String {
     src.replace(
         "content.startswith('<tool_response>') and content.endswith('</tool_response>')",
@@ -52,7 +172,7 @@ impl ChatTemplate {
         Ok(Self { env })
     }
 
-    pub fn apply(&self, messages: &[Message]) -> Result<String> {
+    pub fn apply(&self, messages: &[Message], add_generation_prompt: bool) -> Result<String> {
         let env = match &self.env {
             Some(e) => e,
             None => {
@@ -63,7 +183,7 @@ impl ChatTemplate {
         let tmpl = env.get_template("chat")?;
         let rendered = tmpl.render(context! {
             messages => messages,
-            add_generation_prompt => true,
+            add_generation_prompt => add_generation_prompt,
             enable_thinking => false,
             add_vision_id => false,
         })?;
@@ -88,6 +208,43 @@ pub struct Generator {
 }
 
 impl Generator {
+    fn conversation_messages(&self) -> Vec<Message> {
+        let mut messages =
+            Vec::with_capacity(self.messages.len() + usize::from(self.system_prompt.is_some()));
+        if let Some(ref sys) = self.system_prompt {
+            messages.push(Message {
+                role: "system".into(),
+                content: sys.clone(),
+            });
+        }
+        messages.extend(self.messages.iter().cloned());
+        messages
+    }
+
+    fn rebuild_token_history(&mut self) -> Result<()> {
+        let messages = self.conversation_messages();
+        if messages.is_empty() {
+            self.token_history.clear();
+            return Ok(());
+        }
+
+        let rendered = self.template.apply(&messages, false)?;
+        self.token_history = self.tokenizer.encode_raw(&rendered)?;
+        Ok(())
+    }
+
+    fn drop_oldest_turn(&mut self) -> bool {
+        if self.messages.is_empty() {
+            return false;
+        }
+
+        self.messages.remove(0);
+        if matches!(self.messages.first(), Some(message) if message.role == "assistant") {
+            self.messages.remove(0);
+        }
+        true
+    }
+
     pub fn new(
         model_path: &PathBuf,
         tokenizer_path: Option<&PathBuf>,
@@ -223,45 +380,24 @@ impl Generator {
             content: prompt.into(),
         });
 
-        // Build the messages slice to render: system (if any) followed by history.
-        // Avoid cloning message contents — collect references into a temporary Vec.
-        let sys_msg;
-        let all_messages: Vec<&Message> = {
-            let mut v: Vec<&Message> = Vec::with_capacity(self.messages.len() + 1);
-            if let Some(ref sys) = self.system_prompt {
-                sys_msg = Message {
-                    role: "system".into(),
-                    content: sys.clone(),
-                };
-                v.push(&sys_msg);
+        loop {
+            let owned = self.conversation_messages();
+            let prompt_text = self.template.apply(&owned, true)?;
+            let prompt_tokens = self.tokenizer.encode_raw(&prompt_text)?;
+
+            let total_len = prompt_tokens.len() + max_tokens;
+            if total_len <= self.metadata.context_length {
+                return Ok(prompt_tokens);
             }
-            v.extend(self.messages.iter());
-            v
-        };
 
-        // Collect into owned Messages only for template rendering (minijinja requires
-        // Serialize, which needs owned values).
-        let owned: Vec<Message> = all_messages.into_iter().cloned().collect();
-        let prompt_text = self.template.apply(&owned)?;
-        let prompt_tokens = self.tokenizer.encode_raw(&prompt_text)?;
-
-        let total_len = self.token_history.len() + prompt_tokens.len() + max_tokens;
-        if total_len > self.metadata.context_length {
-            let excess = total_len - self.metadata.context_length;
-            if excess < self.token_history.len() {
-                let old_len = self.token_history.len();
-                self.token_history.drain(0..excess);
-                tracing::debug!(
-                    "Context truncated: {} tokens -> {} tokens (kept most recent)",
-                    old_len,
-                    self.token_history.len()
+            if !self.drop_oldest_turn() {
+                anyhow::bail!(
+                    "Prompt is too large for the model context window ({} > {}).",
+                    total_len,
+                    self.metadata.context_length
                 );
-            } else {
-                self.token_history.clear();
             }
         }
-
-        Ok(prompt_tokens)
     }
 
     pub fn generate<F>(
@@ -282,7 +418,6 @@ impl Generator {
             max_tokens,
             repeat_penalty,
             repeat_last_n,
-            true,
             callback,
             false,
         )?;
@@ -291,6 +426,7 @@ impl Generator {
             role: "assistant".into(),
             content: result.clone(),
         });
+        self.rebuild_token_history()?;
 
         Ok(result)
     }
@@ -308,15 +444,20 @@ impl Generator {
     {
         let prompt_tokens = self.prepare_prompt(prompt, max_tokens)?;
 
-        self.generate_internal_with_tokens(
+        let result = self.generate_internal_with_tokens(
             &prompt_tokens,
             max_tokens,
             repeat_penalty,
             repeat_last_n,
-            true,
             callback,
             true,
         )?;
+
+        self.messages.push(Message {
+            role: "assistant".into(),
+            content: result,
+        });
+        self.rebuild_token_history()?;
 
         Ok(())
     }
@@ -327,50 +468,29 @@ impl Generator {
         max_tokens: usize,
         repeat_penalty: f32,
         repeat_last_n: usize,
-        store_history: bool,
         mut callback: F,
-        streaming: bool,
+        _streaming: bool,
     ) -> Result<String>
     where
         F: FnMut(StreamEvent),
     {
-        let history_len = if store_history {
-            self.token_history.len()
-        } else {
-            0
-        };
-
-        let total_len = if store_history {
-            self.token_history.len() + prompt_tokens.len() + max_tokens
-        } else {
-            prompt_tokens.len() + max_tokens
-        };
-
-        let needs_truncation = total_len > self.metadata.context_length;
-        let excess = if needs_truncation {
-            Some(total_len - self.metadata.context_length)
-        } else {
-            None
-        };
+        let total_len = prompt_tokens.len() + max_tokens;
+        if total_len > self.metadata.context_length {
+            anyhow::bail!(
+                "Prompt is too large for the model context window ({} > {}).",
+                total_len,
+                self.metadata.context_length
+            );
+        }
 
         // Reuse the pre-allocated buffer instead of allocating context_length
         // capacity (up to 128KB) on every call.
         self.all_tokens.clear();
-
-        if store_history {
-            if let Some(excess) = excess {
-                if excess < self.token_history.len() {
-                    self.all_tokens
-                        .extend_from_slice(&self.token_history[excess..]);
-                }
-            } else {
-                self.all_tokens.extend_from_slice(&self.token_history);
-            }
-        }
-
         self.all_tokens.extend_from_slice(prompt_tokens);
 
         let eos_token = self.tokenizer.eos_token_id();
+        let mut response_processor = ResponseProcessor::new();
+        let mut response_text = String::new();
 
         let prompt_start = std::time::Instant::now();
 
@@ -387,18 +507,25 @@ impl Generator {
             prompt_start.elapsed().as_secs_f32()
         );
 
+        let mut generated = 1usize;
         self.all_tokens.push(next_token);
 
         // Emit first generated token via incremental decoder.
         if !self.tokenizer.is_special_token(next_token) {
             if let Some(text) = self.tokenizer.decode_next(next_token)? {
-                if !text.is_empty() {
-                    callback(StreamEvent::Token(text));
+                let processed = response_processor.push(&text);
+                if !processed.text.is_empty() {
+                    response_text.push_str(&processed.text);
+                    callback(StreamEvent::Token(processed.text));
+                }
+                if processed.should_stop {
+                    self.tokenizer.clear_cache();
+                    callback(StreamEvent::Done);
+
+                    return Ok(response_text);
                 }
             }
         }
-
-        let mut generated = 0usize;
 
         let gen_start = std::time::Instant::now();
 
@@ -427,8 +554,13 @@ impl Generator {
             // reached, without buffering or re-decoding previously seen tokens.
             if !self.tokenizer.is_special_token(next_token) {
                 if let Some(text) = self.tokenizer.decode_next(next_token)? {
-                    if !text.is_empty() {
-                        callback(StreamEvent::Token(text));
+                    let processed = response_processor.push(&text);
+                    if !processed.text.is_empty() {
+                        response_text.push_str(&processed.text);
+                        callback(StreamEvent::Token(processed.text));
+                    }
+                    if processed.should_stop {
+                        break;
                     }
                 }
             }
@@ -440,6 +572,12 @@ impl Generator {
         // produce duplicate output. Clearing is sufficient — shimmytok's
         // decode_single emits each fragment as soon as it has enough bytes.
         self.tokenizer.clear_cache();
+
+        let tail = response_processor.finish();
+        if !tail.is_empty() {
+            response_text.push_str(&tail);
+            callback(StreamEvent::Token(tail));
+        }
 
         let dt = gen_start.elapsed();
         let tokens_per_sec = if generated > 0 && dt.as_secs_f64() > 0.0 {
@@ -456,22 +594,7 @@ impl Generator {
 
         callback(StreamEvent::Done);
 
-        let response = if streaming {
-            String::new()
-        } else {
-            let response_start = history_len + prompt_tokens.len();
-            let response_tokens: Vec<u32> = self.all_tokens[response_start..].to_vec();
-            self.tokenizer.decode(&response_tokens)?
-        };
-
-        if store_history {
-            // Swap so token_history holds the full sequence and all_tokens is
-            // left with the old (now stale) history buffer, which will be
-            // cleared at the start of the next call.
-            std::mem::swap(&mut self.token_history, &mut self.all_tokens);
-        }
-
-        Ok(response)
+        Ok(response_text)
     }
 
     pub fn generate_batch(
@@ -502,7 +625,7 @@ impl Generator {
                     role: "user".into(),
                     content: prompt.clone(),
                 });
-                self.template.apply(&all_messages)
+                self.template.apply(&all_messages, true)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -519,7 +642,6 @@ impl Generator {
                 max_tokens,
                 repeat_penalty,
                 repeat_last_n,
-                false,
                 |_| {},
                 false,
             )?;
@@ -531,3 +653,45 @@ impl Generator {
 }
 
 unsafe impl Send for Generator {}
+
+#[cfg(test)]
+mod tests {
+    use super::ResponseProcessor;
+
+    #[test]
+    fn strips_split_control_sequences_across_chunks() {
+        let mut processor = ResponseProcessor::new();
+
+        let first = processor.push("Hello<|im_");
+        assert_eq!(first.text, "Hello");
+        assert!(!first.should_stop);
+
+        let second = processor.push("start|>assistant");
+        assert_eq!(second.text, "");
+        assert!(!second.should_stop);
+
+        let third = processor.push(" world");
+        assert_eq!(third.text, " world");
+        assert!(!third.should_stop);
+    }
+
+    #[test]
+    fn stops_on_im_end_without_emitting_marker() {
+        let mut processor = ResponseProcessor::new();
+
+        let chunk = processor.push("Answer<|im_end|>garbage");
+        assert_eq!(chunk.text, "Answer");
+        assert!(chunk.should_stop);
+    }
+
+    #[test]
+    fn flushes_remaining_text_on_finish() {
+        let mut processor = ResponseProcessor::new();
+
+        let chunk = processor.push("done");
+        assert_eq!(chunk.text, "done");
+        assert!(!chunk.should_stop);
+
+        assert_eq!(processor.finish(), "");
+    }
+}
