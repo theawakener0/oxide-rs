@@ -475,7 +475,6 @@ For more details, see [Performance Guide](docs/performance.md).
 
 ## Roadmap
 
-- [x] Model download/management
 - [ ] PagedAttention integration (full KV cache support)
 - [ ] OpenAI-compatible API server
 - [ ] Multi-modal support
