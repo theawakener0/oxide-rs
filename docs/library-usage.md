@@ -40,8 +40,9 @@ use oxide_rs::Model;
 
 let mut model = Model::new("model.gguf")?
     .with_options(options)
-    .with_tokenizer("tokenizer.json")  // Optional, extracted from GGUF if omitted
-    .load()?;
+    .with_tokenizer("tokenizer.json"); // Optional, extracted from GGUF if omitted
+
+model.load()?;
 ```
 
 ## Usage Patterns
@@ -72,13 +73,14 @@ For multiple generations with the same model:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
+    let mut model = Model::new("model.gguf")?
         .with_options(oxide_rs::GenerateOptions {
             max_tokens: 256,
             temperature: 0.7,
             ..Default::default()
-        })
-        .load()?;
+        });
+
+    model.load()?;
 
     // Multiple generations with same model loaded
     let response1 = model.generate("What is Rust?")?;
@@ -98,8 +100,9 @@ For real-time output as tokens are generated:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
-        .load()?;
+    let mut model = Model::new("model.gguf")?;
+
+    model.load()?;
 
     model.generate_stream("Tell me a story", |token| {
         print!("{}", token);
@@ -119,8 +122,9 @@ Pre-compile compute kernels for faster first-token:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
-        .load()?;
+    let mut model = Model::new("model.gguf")?;
+
+    model.load()?;
 
     // Minimal warmup (1 token) primes branch predictor (~50ms)
     model.warmup(1)?;
@@ -139,12 +143,13 @@ Maintain conversation history across generations:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
+    let mut model = Model::new("model.gguf")?
         .with_options(oxide_rs::GenerateOptions {
             system_prompt: Some("You are a helpful assistant.".into()),
             ..Default::default()
-        })
-        .load()?;
+        });
+
+    model.load()?;
 
     // First turn
     let response1 = model.generate("What is 2+2?")?;
@@ -170,7 +175,8 @@ Get information about the loaded model:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")?.load()?;
+    let mut model = Model::new("model.gguf")?;
+    model.load()?;
 
     if let Some(metadata) = model.metadata() {
         println!("Model: {}", metadata.name);
@@ -192,7 +198,8 @@ Monitor and manage context usage:
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")?.load()?;
+    let mut model = Model::new("model.gguf")?;
+    model.load()?;
 
     // Get context usage
     let used = model.context_used().unwrap_or(0);

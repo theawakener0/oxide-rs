@@ -1,12 +1,55 @@
 # API Reference
 
-Complete API documentation for oxide-rs.
+Reference for the Oxide CLI and Rust library.
 
-## Functions
+## CLI
+
+### Model management
+
+| Flag | Description |
+| --- | --- |
+| `--download <repo>` | Download a model from Hugging Face |
+| `--models` | List locally registered models |
+| `--info <repo>` | Show repository files and recommended GGUF |
+| `--remove <id>` | Remove a registered model entry |
+
+### Generation
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--model <path>` | required | Path to a GGUF model file |
+| `--tokenizer <path>` | auto | Optional tokenizer path |
+| `--system <text>` | none | System prompt |
+| `--prompt <text>` | none | Prompt for one-shot mode |
+| `--once` | `false` | Run once and exit |
+| `--max-tokens <n>` | `512` | Maximum generated tokens |
+| `--temperature <f64>` | `0.3` | Sampling temperature |
+| `--top-k <n>` | none | Top-k sampling |
+| `--top-p <f64>` | none | Nucleus sampling |
+| `--repeat-penalty <f32>` | `1.1` | Repeat penalty |
+| `--repeat-last-n <n>` | `64` | Repeat penalty window |
+| `--batch-size <n>` | `128` | Warmup/prefill batch size |
+| `--seed <u64>` | `299792458` | Random seed |
+| `--threads <n>` | auto | CPU threads |
+| `--max-batch-size <n>` | `8` | Dynamic batching limit |
+| `--batch-window-ms <n>` | `100` | Dynamic batching window |
+| `--simd <level>` | `auto` | `auto`, `avx512`, `avx2`, `neon`, `scalar` |
+
+### Interactive commands
+
+| Command | Description |
+| --- | --- |
+| `/clear` | Clear conversation history |
+| `/context` | Show current context usage |
+| `/stats` | Show model info and current settings |
+| `/help` | Show available commands |
+| `/exit` or `/quit` | Exit interactive mode |
+
+## Library
 
 ### `generate`
 
-Simple one-shot generation function.
+Simple one-shot generation.
 
 ```rust
 pub fn generate<P: AsRef<Path>>(
@@ -16,73 +59,38 @@ pub fn generate<P: AsRef<Path>>(
 ) -> Result<String, Box<dyn std::error::Error>>
 ```
 
-**Parameters:**
-- `model_path` - Path to GGUF model file
-- `options` - Generation configuration
-- `prompt` - Input prompt
-
-**Returns:** Generated text string
-
-**Example:**
+Example:
 
 ```rust
 use oxide_rs::{generate, GenerateOptions};
 
-let result = generate("model.gguf", GenerateOptions::default(), "Hello!")?;
+let output = generate("model.gguf", GenerateOptions::default(), "Hello")?;
 ```
-
----
-
-## Structs
 
 ### `GenerateOptions`
 
-Configuration for text generation.
-
-```rust
-#[derive(Clone, Debug)]
-pub struct GenerateOptions {
-    pub max_tokens: usize,
-    pub temperature: f64,
-    pub top_p: Option<f64>,
-    pub top_k: Option<usize>,
-    pub repeat_penalty: f32,
-    pub repeat_last_n: usize,
-    pub batch_size: usize,
-    pub seed: u64,
-    pub system_prompt: Option<String>,
-    pub max_batch_size: usize,
-    pub batch_window_ms: u64,
-    pub enable_prefix_cache: bool,
-    pub cache_memory_mb: usize,
-    pub cpu_threads: usize,
-    pub reserve_cores: usize,
-    pub simd_level: String,
-}
-```
-
-**Fields:**
+Configuration for generation.
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_tokens` | `usize` | `512` | Maximum tokens to generate |
-| `temperature` | `f64` | `0.3` | Sampling temperature (0.0 = greedy/argmax) |
-| `top_p` | `Option<f64>` | `None` | Nucleus sampling threshold (0.0-1.0) |
+| --- | --- | --- | --- |
+| `max_tokens` | `usize` | `512` | Maximum generated tokens |
+| `temperature` | `f64` | `0.3` | Sampling temperature |
+| `top_p` | `Option<f64>` | `None` | Nucleus sampling threshold |
 | `top_k` | `Option<usize>` | `None` | Top-k sampling threshold |
-| `repeat_penalty` | `f32` | `1.1` | Penalty for repeated tokens (1.0 = no penalty) |
-| `repeat_last_n` | `usize` | `64` | Context window for repeat penalty |
-| `batch_size` | `usize` | `128` | Number of tokens for warmup (1 = minimal) |
-| `seed` | `u64` | `299792458` | Random seed for reproducibility |
-| `system_prompt` | `Option<String>` | `None` | System prompt to prepend |
-| `max_batch_size` | `usize` | `8` | Maximum batch size for dynamic batching |
-| `batch_window_ms` | `u64` | `100` | Time window (ms) for batching requests |
-| `enable_prefix_cache` | `bool` | `true` | Enable prefix caching for faster TTFT |
-| `cache_memory_mb` | `usize` | `512` | Memory budget for prefix cache (MB) |
-| `cpu_threads` | `usize` | `0` | CPU threads (0 = auto-detect n-1) |
-| `reserve_cores` | `usize` | `0` | Cores to reserve for OS |
-| `simd_level` | `String` | `"auto"` | SIMD level (auto/avx512/avx2/neon/scalar) |
+| `repeat_penalty` | `f32` | `1.1` | Repeat penalty |
+| `repeat_last_n` | `usize` | `64` | Repeat penalty window |
+| `batch_size` | `usize` | `128` | Warmup/prefill batch size |
+| `seed` | `u64` | `299792458` | Random seed |
+| `system_prompt` | `Option<String>` | `None` | Optional system prompt |
+| `max_batch_size` | `usize` | `4` | Dynamic batching limit |
+| `batch_window_ms` | `u64` | `1` | Dynamic batching window |
+| `enable_prefix_cache` | `bool` | `true` | Enable prefix caching |
+| `cache_memory_mb` | `usize` | `512` | Prefix cache memory budget |
+| `cpu_threads` | `usize` | `0` | CPU threads, `0` means auto |
+| `reserve_cores` | `usize` | `0` | CPU cores reserved for OS |
+| `simd_level` | `String` | `"auto"` | SIMD level selection |
 
-**Example:**
+Example:
 
 ```rust
 use oxide_rs::GenerateOptions;
@@ -93,23 +101,13 @@ let options = GenerateOptions {
     top_p: Some(0.9),
     top_k: Some(40),
     repeat_penalty: 1.15,
-    repeat_last_n: 64,
-    batch_size: 1,
-    seed: 42,
-    system_prompt: Some("You are a helpful assistant.".into()),
-    max_batch_size: 8,
-    batch_window_ms: 100,
-    enable_prefix_cache: true,
-    cache_memory_mb: 512,
-    cpu_threads: 0,
-    reserve_cores: 0,
-    simd_level: "auto".to_string(),
+    ..Default::default()
 };
 ```
 
 ### `Model`
 
-High-level model wrapper with builder pattern.
+High-level wrapper for repeated generations.
 
 ```rust
 pub struct Model {
@@ -117,229 +115,58 @@ pub struct Model {
 }
 ```
 
-**Methods:**
+Core methods:
 
-#### `new`
+| Method | Purpose |
+| --- | --- |
+| `Model::new(path)` | Create a model handle |
+| `with_options(options)` | Set generation options |
+| `with_tokenizer(path)` | Use a custom tokenizer |
+| `load()` | Load the model into memory |
+| `generate(prompt)` | Generate a full response |
+| `generate_stream(prompt, callback)` | Stream tokens as they are produced |
+| `generate_batch(prompts)` | Generate for multiple prompts |
+| `warmup(num_tokens)` | Warm up compute paths |
+| `clear_history()` | Clear conversation history |
+| `metadata()` | Access GGUF metadata |
+| `context_used()` | Current context usage |
+| `context_limit()` | Maximum context window |
+| `context_percentage()` | Context usage as a percentage |
 
-Create a new Model instance.
-
-```rust
-pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self, Box<dyn std::error::Error>>
-```
-
-**Example:**
-
-```rust
-let model = Model::new("model.gguf")?;
-```
-
----
-
-#### `with_options`
-
-Set generation options.
+Example:
 
 ```rust
-pub fn with_options(mut self, options: GenerateOptions) -> Self
-```
+use oxide_rs::Model;
 
-**Example:**
-
-```rust
-let model = Model::new("model.gguf")
-    .with_options(GenerateOptions {
+let mut model = Model::new("model.gguf")?
+    .with_options(oxide_rs::GenerateOptions {
         max_tokens: 256,
+        temperature: 0.7,
         ..Default::default()
     });
+
+model.load()?;
+
+let output = model.generate("Explain ownership in Rust.")?;
 ```
 
----
+### `StreamEvent`
 
-#### `with_tokenizer`
-
-Set custom tokenizer path.
+Streaming generation emits these events:
 
 ```rust
-pub fn with_tokenizer<P: AsRef<Path>>(self, tokenizer_path: P) -> Self
-```
-
-**Example:**
-
-```rust
-let model = Model::new("model.gguf")
-    .with_tokenizer("tokenizer.json");
-```
-
----
-
-#### `load`
-
-Load the model into memory.
-
-```rust
-pub fn load(&mut self) -> Result<(), Box<dyn std::error::Error>>
-```
-
-**Example:**
-
-```rust
-let mut model = Model::new("model.gguf")?.load()?;
-```
-
----
-
-#### `generate`
-
-Generate text from a prompt.
-
-```rust
-pub fn generate(&mut self, prompt: &str) -> Result<String, Box<dyn std::error::Error>>
-```
-
-**Example:**
-
-```rust
-let response = model.generate("Hello!")?;
-```
-
----
-
-#### `generate_stream`
-
-Generate text with streaming callback.
-
-```rust
-pub fn generate_stream<F>(&mut self, prompt: &str, callback: F) -> Result<String, Box<dyn std::error::Error>>
-where
-    F: FnMut(String),
-```
-
-**Example:**
-
-```rust
-model.generate_stream("Tell me a story", |token| {
-    print!("{}", token);
-})?;
-```
-
----
-
-#### `warmup`
-
-Pre-compile compute kernels.
-
-```rust
-pub fn warmup(&mut self, num_tokens: usize) -> Result<(), Box<dyn std::error::Error>>
-```
-
-**Example:**
-
-```rust
-model.warmup(128)?;  // Warmup with 128 tokens
-```
-
----
-
-#### `clear_history`
-
-Clear conversation history.
-
-```rust
-pub fn clear_history(&mut self)
-```
-
-**Example:**
-
-```rust
-model.clear_history();
-```
-
----
-
-#### `metadata`
-
-Get model metadata.
-
-```rust
-pub fn metadata(&self) -> Option<&GgufMetadata>
-```
-
-**Example:**
-
-```rust
-if let Some(meta) = model.metadata() {
-    println!("{}", meta.name);
+pub enum StreamEvent {
+    Token(String),
+    PrefillStatus(usize),
+    Done,
 }
-```
-
----
-
-#### `context_used`
-
-Get current context usage (number of tokens in context).
-
-```rust
-pub fn context_used(&self) -> Option<usize>
-```
-
-**Example:**
-
-```rust
-let used = model.context_used().unwrap_or(0);
-println!("Using {} tokens", used);
-```
-
----
-
-#### `context_limit`
-
-Get maximum context window size.
-
-```rust
-pub fn context_limit(&self) -> Option<usize>
-```
-
-**Example:**
-
-```rust
-let limit = model.context_limit().unwrap_or(4096);
-println!("Context limit: {} tokens", limit);
-```
-
----
-
-#### `context_percentage`
-
-Get context usage as percentage (0.0 - 100.0).
-
-```rust
-pub fn context_percentage(&self) -> Option<f32>
-```
-
-**Example:**
-
-```rust
-let pct = model.context_percentage().unwrap_or(0.0);
-println!("{:.1}% context used", pct);
-```
-
----
-
-## Re-exports
-
-These types are also exported at the crate root:
-
-```rust
-pub use inference::{Generator, StreamEvent, ChatTemplate, Message};
-pub use model::{GgufMetadata, TokenizerWrapper};
 ```
 
 ### `GgufMetadata`
 
-Model metadata extracted from GGUF file.
+Metadata extracted from the model file.
 
 ```rust
-#[derive(Debug, Clone)]
 pub struct GgufMetadata {
     pub name: String,
     pub architecture: String,
@@ -352,77 +179,9 @@ pub struct GgufMetadata {
 }
 ```
 
-### `StreamEvent`
+## More
 
-Events during streaming generation.
-
-```rust
-pub enum StreamEvent {
-    Token(String),
-    PrefillStatus(usize),
-    Done,
-}
-```
-
-**Variants:**
-- `Token(String)` - A generated token
-- `PrefillStatus(usize)` - Prompt processing status (token count)
-- `Done` - Generation complete
-
-### `Message`
-
-Chat message structure.
-
-```rust
-#[derive(Clone, Serialize)]
-pub struct Message {
-    pub role: String,
-    pub content: String,
-}
-```
-
-### `ChatTemplate`
-
-Chat template handler.
-
-```rust
-pub struct ChatTemplate { /* private */ }
-
-impl ChatTemplate {
-    pub fn new(template: Option<String>) -> Result<Self, Box<dyn std::error::Error>>
-    pub fn apply(&self, messages: &[Message]) -> Result<String, Box<dyn std::error::Error>>
-}
-```
-
----
-
-## Traits
-
-### `Default` for `GenerateOptions`
-
-Provides default configuration values.
-
-```rust
-impl Default for GenerateOptions {
-    fn default() -> Self {
-        Self {
-            max_tokens: 512,
-            temperature: 0.3,
-            top_p: None,
-            top_k: None,
-            repeat_penalty: 1.1,
-            repeat_last_n: 64,
-            batch_size: 128,
-            seed: 299792458,
-            system_prompt: None,
-            max_batch_size: 8,
-            batch_window_ms: 100,
-            enable_prefix_cache: true,
-            cache_memory_mb: 512,
-            cpu_threads: 0,
-            reserve_cores: 0,
-            simd_level: "auto".to_string(),
-        }
-    }
-}
-```
+- `docs/getting-started.md` for CLI workflows
+- `docs/library-usage.md` for deeper library examples
+- `docs/examples.md` for sample programs
+- `docs/architecture.md` for implementation details

@@ -1,156 +1,153 @@
-# Getting Started with Oxide-rs
+# Getting Started
 
-Oxide-rs is both a CLI tool and a Rust library for AI inference. This guide covers installation and quick start for both usage modes.
+Oxide is a CLI and Rust library for running GGUF language models locally.
 
-## Installation
+## Requirements
 
-### Prerequisites
+- Rust 1.70+
+- A GGUF model file
+- For chat mode, a model with an embedded chat template
 
-- Rust 1.70+ (2021 edition)
-- A GGUF quantized model file with embedded chat template
+Oxide is currently focused on CPU-based local inference.
 
-### From crates.io (Library/CLI)
+## Install
 
-```bash
-# Add as a dependency to your Rust project
-cargo add oxide-rs
-
-# Or add to Cargo.toml manually
-oxide-rs = "0.1.14"
-```
-
-### Build from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/theawakener0/oxide-rs.git
-cd oxide-rs
-
-# Build release binary
-cargo build --release
-```
-
-### Install via Cargo (CLI)
+Install from crates.io:
 
 ```bash
 cargo install oxide-rs
-# Installs to ~/.cargo/bin/oxide-rs
 ```
 
-## CLI Quick Start
+Build from source:
 
 ```bash
-# If installed via cargo install
-oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
-
-# Or run directly from source
-./target/release/oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
-
-# One-shot generation
-./target/release/oxide-rs --model ~/Models/model.gguf --once --prompt "Hello!"
-
-# With custom parameters
-./target/release/oxide-rs --model ~/Models/model.gguf \
-  --temperature 0.8 \
-  --max-tokens 256
+git clone https://github.com/theawakener0/oxide-rs.git
+cd oxide-rs
+cargo build --release
 ```
 
-## Interactive Mode Commands
+The release binary is available at `target/release/oxide-rs`.
 
-When running in interactive mode, you can use these commands:
+## Quick start
+
+Download a model from Hugging Face:
+
+```bash
+oxide-rs --download "meta-llama/Llama-3.2-1B-Instruct"
+```
+
+Inspect a repo before downloading:
+
+```bash
+oxide-rs --info "Qwen/Qwen2.5-0.5B-Instruct"
+```
+
+List registered local models:
+
+```bash
+oxide-rs --models
+```
+
+Run interactive chat:
+
+```bash
+oxide-rs --model /path/to/model.gguf
+```
+
+Run one-shot generation:
+
+```bash
+oxide-rs --model /path/to/model.gguf --once --prompt "Hello"
+```
+
+Use a custom system prompt:
+
+```bash
+oxide-rs --model /path/to/model.gguf --system "You are a Rust expert."
+```
+
+Tune sampling:
+
+```bash
+oxide-rs --model /path/to/model.gguf \
+  --temperature 0.8 \
+  --top-k 40 \
+  --top-p 0.9 \
+  --repeat-penalty 1.15
+```
+
+## Interactive mode
+
+When running without `--once`, Oxide keeps conversation history and accepts these commands:
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `/clear` | Clear conversation history |
-| `/context` | Show context usage (tokens used / limit) |
-| `/stats` | Show model info and current settings |
+| `/context` | Show current context usage |
+| `/stats` | Show model and generation settings |
 | `/help` | Show available commands |
-| `/exit` | Exit the program |
+| `/exit` or `/quit` | Exit the program |
 
-## Features
+## Model management
 
-- **Thinking Spinner**: Shows `🦀💭 Thinking...` animation while waiting for the first token
-- **Live Stats**: Displays tokens per second every 0.5s during generation
-- **Context Tracking**: Shows context usage in stats (e.g., `Context: 2048/4096`)
-- **Special Token Handling**: Automatically strips chat template tokens and converts newlines
-- **Performance Tuning**: Configurable batch size and prefetch size
-
-## CLI Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-m, --model` | required | Path to GGUF model file |
-| `-t, --tokenizer` | auto | Path to tokenizer.json |
-| `-s, --system` | auto | System prompt |
-| `--max-tokens` | 512 | Maximum tokens to generate |
-| `--temperature` | 0.3 | Sampling temperature |
-| `--top-k` | none | Top-k sampling |
-| `--top-p` | none | Top-p sampling |
-| `--repeat-penalty` | 1.1 | Repeat penalty |
-| `--repeat-last-n` | 64 | Context window for repeat penalty |
-| `--batch-size` | 128 | Warmup tokens (1 = minimal warmup) |
-| `--seed` | 299792458 | Random seed |
-| `--threads` | auto | Thread count |
-| `--reserve-cores` | 0 | Cores to reserve for OS |
-| `--simd-level` | auto | SIMD level (auto/avx512/avx2/neon/scalar) |
-| `-p, --prompt` | none | Input prompt |
-| `-o, --once` | false | Non-interactive mode |
-
-## Library Quick Start
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-oxide-rs = "0.1.14"
-```
-
-### Basic Usage
-
-```rust
-use oxide_rs::{generate, GenerateOptions};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let options = GenerateOptions::default();
-    let result = generate("model.gguf", options, "Hello, how are you?")?;
-    println!("{}", result);
-    Ok(())
-}
-```
-
-### Using the Builder API
-
-```rust
-use oxide_rs::Model;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
-        .with_options(oxide_rs::GenerateOptions {
-            max_tokens: 256,
-            temperature: 0.7,
-            ..Default::default()
-        })
-        .load()?;
-
-    let response = model.generate("What is Rust?")?;
-    println!("{}", response);
-    Ok(())
-}
-```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL` | `~/Models/model.gguf` | Path to GGUF model for `make run` |
+Show model repo details and available GGUF files:
 
 ```bash
-export MODEL=~/Models/mistral-7b.Q4_K_M.gguf
-make run
+oxide-rs --info "Qwen/Qwen2.5-0.5B-Instruct"
 ```
 
-## Next Steps
+Download a model:
 
-- [Library Usage Guide](library-usage.md) - Deep dive into the library API
-- [API Reference](api-reference.md) - Detailed API documentation
-- [Examples](examples.md) - More code examples
+```bash
+oxide-rs --download "meta-llama/Llama-3.2-1B-Instruct"
+```
+
+List registered models:
+
+```bash
+oxide-rs --models
+```
+
+Remove a registered model entry:
+
+```bash
+oxide-rs --remove "model-id"
+```
+
+Downloaded files are stored in the Hugging Face cache at `~/.cache/huggingface/hub/`.
+Oxide tracks downloaded models in `~/.oxide/models.json`.
+
+## Common workflows
+
+Run from source during development:
+
+```bash
+cargo run --release -- --model /path/to/model.gguf
+```
+
+One-shot generation from source:
+
+```bash
+cargo run --release -- --model /path/to/model.gguf --once --prompt "Write a hello world program in Rust"
+```
+
+Check formatting and build health:
+
+```bash
+cargo fmt
+cargo check
+cargo test
+```
+
+## Caveats
+
+- Prefer long flags in examples for clarity.
+- Chat-oriented usage expects a GGUF file with an embedded chat template.
+- Oxide targets local CPU inference rather than GPU setup.
+
+## Next
+
+- `docs/api-reference.md` for CLI flags and library surface
+- `docs/library-usage.md` for embedding Oxide in Rust code
+- `docs/examples.md` for concrete code samples
+- `docs/architecture.md` for internals and performance notes

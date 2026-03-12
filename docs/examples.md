@@ -32,7 +32,8 @@ cargo run --example hello
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")?.load()?;
+    let mut model = Model::new("model.gguf")?;
+    model.load()?;
 
     println!("Chat started. Type 'quit' to exit.\n");
 
@@ -101,9 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let mut model = Model::new("model.gguf")
-            .with_options(options)
-            .load()?;
+        let mut model = Model::new("model.gguf")?
+            .with_options(options);
+
+        model.load()?;
 
         let result = model.generate(prompt)?;
         println!("\n=== Temperature {} ===", temp);
@@ -153,7 +155,8 @@ use oxide_rs::Model;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")?.load()?;
+    let mut model = Model::new("model.gguf")?;
+    model.load()?;
 
     let start = Instant::now();
     let mut token_count = 0;
@@ -186,13 +189,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Who wrote Hamlet?",
     ];
 
-    let mut model = Model::new("model.gguf")
+    let mut model = Model::new("model.gguf")?
         .with_options(oxide_rs::GenerateOptions {
             max_tokens: 50,
             temperature: 0.3,
             ..Default::default()
-        })
-        .load()?;
+        });
+
+    model.load()?;
 
     for prompt in prompts {
         print!("Q: {} ", prompt);
@@ -216,13 +220,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Who wrote Hamlet?".to_string(),
     ];
 
-    let mut model = Model::new("model.gguf")
+    let mut model = Model::new("model.gguf")?
         .with_options(oxide_rs::GenerateOptions {
             max_tokens: 50,
             temperature: 0.3,
             ..Default::default()
-        })
-        .load()?;
+        });
+
+    model.load()?;
 
     // Process all prompts in a single batch call
     let results = model.generate_batch(prompts)?;
@@ -272,12 +277,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")
+    let mut model = Model::new("model.gguf")?
         .with_options(oxide_rs::GenerateOptions {
             system_prompt: Some("You are a helpful math tutor.".into()),
             ..Default::default()
-        })
-        .load()?;
+        });
+
+    model.load()?;
 
     // Turn 1
     println!("You: What is 5 + 3?");
@@ -312,7 +318,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut model = Model::new("model.gguf")?.load()?;
+    let mut model = Model::new("model.gguf")?;
+    model.load()?;
 
     let meta = model.metadata()
         .expect("No metadata available");
@@ -340,9 +347,10 @@ use oxide_rs::Model;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use custom tokenizer if model doesn't have one embedded
-    let mut model = Model::new("model.gguf")
-        .with_tokenizer("tokenizer.json")
-        .load()?;
+    let mut model = Model::new("model.gguf")?
+        .with_tokenizer("tokenizer.json");
+
+    model.load()?;
 
     let result = model.generate("Hello!")?;
     println!("{}", result);
@@ -383,15 +391,15 @@ use once_cell::sync::Lazy;
 
 // Global model instance (load once at startup)
 static MODEL: Lazy<Mutex<Model>> = Lazy::new(|| {
-    Mutex::new(
-        Model::new("model.gguf")
-            .with_options(oxide_rs::GenerateOptions {
-                max_tokens: 256,
-                ..Default::default()
-            })
-            .load()
-            .expect("Failed to load model")
-    )
+    let mut model = Model::new("model.gguf")
+        .expect("Failed to create model")
+        .with_options(oxide_rs::GenerateOptions {
+            max_tokens: 256,
+            ..Default::default()
+        });
+
+    model.load().expect("Failed to load model");
+    Mutex::new(model)
 });
 
 fn handle_request(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
