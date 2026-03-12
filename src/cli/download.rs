@@ -14,45 +14,11 @@ use crossterm::{
 use crate::cli::theme::Theme;
 use crate::model::download::{format_size, DownloadProgress};
 
-pub struct DownloadProgressBar {
-    _running: Arc<AtomicBool>,
-}
+pub struct DownloadProgressBar {}
 
 impl DownloadProgressBar {
-    pub fn new(filename: &str, _total_size: u64) -> Self {
-        let running = Arc::new(AtomicBool::new(true));
-        let running_clone = running.clone();
-        let filename = filename.to_string();
-
-        thread::spawn(move || {
-            let mut stdout = io::stdout();
-            let mut i = 0usize;
-            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-            while running_clone.load(Ordering::Relaxed) {
-                let frame = frames[i % frames.len()];
-
-                execute!(
-                    stdout,
-                    MoveToColumn(0),
-                    Clear(ClearType::CurrentLine),
-                    SetForegroundColor(Theme::RUST_ORANGE),
-                    Print(frame),
-                    ResetColor,
-                    Print(" "),
-                    SetForegroundColor(Theme::TEXT_PRIMARY),
-                    Print(&filename),
-                    ResetColor
-                )
-                .ok();
-
-                stdout.flush().ok();
-                thread::sleep(Duration::from_millis(100));
-                i = i.wrapping_add(1);
-            }
-        });
-
-        Self { _running: running }
+    pub fn new(_filename: &str, _total_size: u64) -> Self {
+        Self {}
     }
 
     pub fn update(&mut self, progress: &DownloadProgress) {
