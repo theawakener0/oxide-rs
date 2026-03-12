@@ -104,6 +104,10 @@ struct Cli {
     /// SIMD level (auto/avx512/avx2/neon/scalar)
     #[arg(long, default_value = "auto")]
     simd: String,
+
+    /// Launch TUI mode instead of CLI chat
+    #[arg(short, long)]
+    tui: bool,
 }
 
 fn main() -> Result<()> {
@@ -134,6 +138,11 @@ fn main() -> Result<()> {
 
     if let Some(model_id) = &cli.remove {
         handle_remove(model_id)?;
+        return Ok(());
+    }
+
+    if cli.tui {
+        oxide_rs::tui::run(cli.model.clone(), cli.download.clone())?;
         return Ok(());
     }
 

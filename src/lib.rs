@@ -79,6 +79,7 @@
 pub mod cli;
 pub mod inference;
 pub mod model;
+pub mod tui;
 
 use std::path::Path;
 use std::path::PathBuf;
