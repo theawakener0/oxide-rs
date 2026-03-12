@@ -5,7 +5,8 @@ use anyhow::Result;
 use clap::Parser;
 use oxide_rs::cli::download::DownloadProgressBar;
 use oxide_rs::cli::{
-    ModelLoader, PromptDisplay, Spinner, StreamOutput, ThinkingSpinner, print_banner, print_divider, print_model_info, print_welcome
+    print_banner, print_divider, print_model_info, print_welcome, ModelLoader, PromptDisplay,
+    Spinner, StreamOutput, ThinkingSpinner,
 };
 use oxide_rs::inference::{
     init_simd, init_thread_pinner, simd_dispatch::SimdLevel, thread_pinner::ThreadPinnerConfig,
@@ -148,7 +149,7 @@ fn handle_download(repo_id: &str) -> Result<()> {
     print_banner();
     print_divider();
     println!();
-    
+
     let spinner = Spinner::new("Fetching model info...");
     spinner.finish();
 
