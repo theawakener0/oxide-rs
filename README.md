@@ -34,6 +34,8 @@
 - **Live tok/s Display** — Real-time tokens-per-second updates during generation
 - **Context Tracking** — Shows context usage in loading info and generation stats
 - **Configurable Performance** — Batch size, threads, SIMD level configurable via CLI
+- **Model Download** — Download GGUF models directly from HuggingFace Hub
+- **Model Management** — Track and manage locally downloaded models
 
 ## Installation
 
@@ -68,6 +70,15 @@ oxide-rs --model model.gguf --once --prompt "Hello"
 ## Quick Start
 
 ```bash
+# Download a model from HuggingFace (auto-selects best GGUF quantization)
+oxide-rs --download "meta-llama/Llama-3.2-1B-Instruct"
+
+# List locally downloaded models
+oxide-rs --models
+
+# Show model info before downloading
+oxide-rs --info "Qwen/Qwen2.5-0.5B-Instruct"
+
 # Interactive chat mode (uses default helpful system prompt)
 ./target/release/oxide-rs --model ~/Models/your-model-Q4_K_M.gguf
 
@@ -139,6 +150,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 For more examples, see the [docs/](docs/) directory.
 
 ## CLI Reference
+
+### Model Management
+
+| Flag | Description |
+|------|-------------|
+| `--download <repo>` | Download a model from HuggingFace Hub |
+| `--models` | List all locally downloaded models |
+| `--info <repo>` | Show information about a model on HuggingFace |
+| `--remove <id>` | Remove a model from local storage |
+
+### Generation
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -355,6 +377,18 @@ cargo run --release -- --model ~/path/to/model.gguf
 # Run in one-shot mode
 cargo run --release -- --model ~/path/to/model.gguf --once --prompt "Hello"
 
+# Download a model
+cargo run --release -- --download "meta-llama/Llama-3.2-1B-Instruct"
+
+# List downloaded models
+cargo run --release -- --models
+
+# Get model info
+cargo run --release -- --info "Qwen/Qwen2.5-0.5B-Instruct"
+
+# Remove a model
+cargo run --release -- --remove "llama-3.2-1b-q4_k_m"
+
 # Format code
 cargo fmt
 
@@ -367,6 +401,36 @@ cargo test
 # Clean build artifacts
 cargo clean
 ```
+
+## Model Download
+
+Oxide can download GGUF models directly from HuggingFace Hub:
+
+```bash
+# Download a model (auto-selects best Q4 quantization)
+oxide-rs --download "meta-llama/Llama-3.2-1B-Instruct"
+
+# Download specific model
+oxide-rs --download "unsloth/Qwen3.5-0.8B-GGUF"
+
+# List downloaded models
+oxide-rs --models
+
+# Get model info before downloading
+oxide-rs --info "Qwen/Qwen2.5-0.5B-Instruct"
+
+# Remove a model from registry
+oxide-rs --remove "qwen2.5-0.5b-q4_k_m"
+```
+
+### How It Works
+
+1. **Repository Query** — Queries HuggingFace API for available files
+2. **Auto-Selection** — Automatically selects best GGUF file (Q4_K_M priority)
+3. **Download** — Downloads to HuggingFace cache (~/.cache/huggingface/hub/)
+4. **Registry** — Tracks downloaded models in ~/.oxide/models.json
+
+Models are stored in the HuggingFace cache, compatible with python huggingface_hub.
 
 ## Dependencies
 
@@ -384,6 +448,10 @@ cargo clean
 | `anyhow` | Ergonomic error handling |
 | `serde` | Serialization for messages |
 | `tracing` | Structured logging |
+| `hf-hub` | HuggingFace Hub integration for model downloads |
+| `dirs` | Platform-specific directory paths |
+| `reqwest` | HTTP client for API requests |
+| `chrono` | Date/time handling for model registry |
 
 ## Performance
 
@@ -407,9 +475,9 @@ For more details, see [Performance Guide](docs/performance.md).
 
 ## Roadmap
 
+- [x] Model download/management
 - [ ] PagedAttention integration (full KV cache support)
 - [ ] OpenAI-compatible API server
-- [ ] Model download/management
 - [ ] Multi-modal support
 
 ## License
