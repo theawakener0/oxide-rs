@@ -57,6 +57,18 @@ At runtime it:
 
 If a model does not include a usable chat template, chat workflows may fail or require a different model.
 
+## Model download flow
+
+When you run `oxide-rs --download <repo>`, Oxide:
+
+1. Queries the Hugging Face repository metadata
+2. Filters for GGUF files
+3. Picks a recommended file when multiple GGUF files are present
+4. Downloads the file into the Hugging Face cache
+5. Registers the downloaded file in Oxide's local model registry
+
+This keeps downloaded files compatible with the normal Hugging Face cache layout while still letting Oxide list and remove registered models.
+
 ## Supported formats and model families
 
 Oxide targets GGUF model files.
@@ -74,6 +86,8 @@ Compatible GGUF tokenizer families include:
 - UGM
 - RWKV
 
+In practice, this covers common GGUF releases built for local inference workflows similar to `llama.cpp`.
+
 ## Performance notes
 
 Oxide is designed for local CPU inference.
@@ -90,10 +104,52 @@ Notable implementation choices:
 
 Some performance-oriented pieces are already present as infrastructure for future work, including dynamic batching and paged cache support.
 
+## CLI runtime behavior
+
+The CLI layers a few usability features on top of the inference core:
+
+- token-by-token streaming output
+- first-token thinking spinner during prefill
+- model metadata display after load
+- context usage reporting in interactive mode
+- live generation stats in the streaming UI
+
 ## Downloaded model storage
 
 - Model files are downloaded into the Hugging Face cache: `~/.cache/huggingface/hub/`
 - Oxide keeps a local registry at `~/.oxide/models.json`
+
+## Dependencies
+
+Core crates used by Oxide:
+
+| Crate | Purpose |
+| --- | --- |
+| `candle-core` | Tensor operations and ML primitives |
+| `candle-nn` | Neural network layers |
+| `candle-transformers` | Transformer model implementations |
+| `shimmytok` | GGUF tokenizer support |
+| `minijinja` | Chat template rendering |
+| `rayon` | Parallel CPU execution |
+| `tokio` | Async runtime for batching infrastructure |
+| `clap` | CLI parsing |
+| `crossterm` | Terminal output and interaction |
+| `hf-hub` | Hugging Face integration |
+
+## Roadmap
+
+Areas already hinted at in the codebase and docs:
+
+- fuller paged attention / KV cache work
+- OpenAI-compatible API serving
+- multi-modal support
+
+## Acknowledgments
+
+- `Candle` for the Rust ML runtime
+- `llama.cpp` for the local inference inspiration and GGUF ecosystem
+- `shimmytok` for tokenizer compatibility
+- `minijinja` for template rendering
 
 ## Related docs
 

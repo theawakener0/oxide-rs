@@ -76,6 +76,16 @@ oxide-rs --model /path/to/model.gguf \
   --repeat-penalty 1.15
 ```
 
+## Supported models
+
+Oxide currently targets:
+
+- GGUF model files
+- LLaMA-compatible architectures
+- LFM2
+
+For chat-style usage, prefer GGUF models that include an embedded chat template.
+
 ## Interactive mode
 
 When running without `--once`, Oxide keeps conversation history and accepts these commands:

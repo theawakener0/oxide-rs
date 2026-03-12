@@ -35,6 +35,11 @@ Reference for the Oxide CLI and Rust library.
 | `--batch-window-ms <n>` | `100` | Dynamic batching window |
 | `--simd <level>` | `auto` | `auto`, `avx512`, `avx2`, `neon`, `scalar` |
 
+Notes:
+
+- CLI defaults shown here are the command-line defaults.
+- Library defaults for `GenerateOptions` differ for some batching-related fields because they come from the crate API rather than the CLI wrapper.
+
 ### Interactive commands
 
 | Command | Description |
