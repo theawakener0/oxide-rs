@@ -370,7 +370,7 @@ impl App {
             return Ok(());
         }
 
-        if matches!(key.code, KeyCode::Char('?')) {
+        if matches!(key.code, KeyCode::Char('?') | KeyCode::F(1)) {
             let mut state_guard = Self::state_mut();
             if let Some(state) = state_guard.as_mut() {
                 state.show_help = !state.show_help;
@@ -380,7 +380,7 @@ impl App {
 
         let state = Self::current_state();
         if state.show_help {
-            if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::F(1)) {
                 let mut state_guard = Self::state_mut();
                 if let Some(state) = state_guard.as_mut() {
                     state.show_help = false;
@@ -579,6 +579,69 @@ impl App {
         let mut state_guard = Self::state_mut();
         let state = state_guard.as_mut().unwrap();
 
+        let editing_system_prompt = state.settings_selected_field == 7;
+
+        if editing_system_prompt {
+            match code {
+                KeyCode::Tab => {
+                    state.cycle_focus_forward();
+                    return;
+                }
+                KeyCode::BackTab => {
+                    state.cycle_focus_backward();
+                    return;
+                }
+                KeyCode::Up => {
+                    state.settings_selected_field = state.settings_selected_field.saturating_sub(1);
+                    return;
+                }
+                KeyCode::Down => {
+                    state.settings_selected_field =
+                        (state.settings_selected_field + 1).min(SETTINGS_FIELD_COUNT - 1);
+                    return;
+                }
+                KeyCode::Backspace => {
+                    if let Some(prompt) = state.draft_options.system_prompt.as_mut() {
+                        prompt.pop();
+                    }
+                    state.mark_settings_dirty();
+                    return;
+                }
+                KeyCode::Enter => {
+                    if state.settings_dirty {
+                        state.options = state.draft_options.clone();
+                        state.settings_dirty = false;
+                        let options = state.options.clone();
+                        let reload_model = true;
+                        let _ = self.worker_tx.send(WorkerCommand::UpdateOptions {
+                            options,
+                            reload_model,
+                        });
+                        state.set_notification(NotificationLevel::Info, "Applying settings...");
+                    }
+                    return;
+                }
+                KeyCode::Esc => {
+                    if state.notification.is_some() {
+                        state.clear_notification();
+                    } else {
+                        self.should_quit = true;
+                    }
+                    return;
+                }
+                KeyCode::Char(c) => {
+                    let prompt = state
+                        .draft_options
+                        .system_prompt
+                        .get_or_insert_with(String::new);
+                    prompt.push(c);
+                    state.mark_settings_dirty();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match code {
             KeyCode::Tab => state.cycle_focus_forward(),
             KeyCode::BackTab => state.cycle_focus_backward(),
@@ -598,28 +661,8 @@ impl App {
             KeyCode::Char('r') => {
                 state.sync_draft_options();
             }
-            KeyCode::Backspace => {
-                if state.settings_selected_field == 7 {
-                    if let Some(prompt) = state.draft_options.system_prompt.as_mut() {
-                        prompt.pop();
-                    }
-                    state.mark_settings_dirty();
-                }
-            }
-            KeyCode::Char(c) => {
-                if state.settings_selected_field == 7 {
-                    let prompt = state
-                        .draft_options
-                        .system_prompt
-                        .get_or_insert_with(String::new);
-                    prompt.push(c);
-                    state.mark_settings_dirty();
-                }
-            }
             KeyCode::Enter => {
-                if state.settings_selected_field == 7 {
-                    state.mark_settings_dirty();
-                } else if state.settings_dirty {
+                if state.settings_dirty {
                     state.options = state.draft_options.clone();
                     state.settings_dirty = false;
                     let options = state.options.clone();
@@ -709,7 +752,7 @@ impl App {
                 area.height * 2 / 3,
             );
             let help = ratatui::widgets::Paragraph::new(
-                "Shortcuts\n\nGlobal\n  ?         Toggle help\n  Tab       Next focus\n  Shift+Tab Previous focus\n  Esc       Dismiss/quit\n\nSidebar\n  j/k       Move screens\n  Enter     Open screen\n\nChat\n  Enter     Send prompt\n  j/k       Scroll chat (main focus)\n\nModels\n  j/k       Move models\n  Enter     Load model\n  x         Remove highlighted model\n\nSettings\n  j/k       Move field\n  h/l       Adjust value\n  Enter     Apply settings\n  r         Reset draft\n  Type      Edit system prompt field",
+                "Shortcuts\n\nGlobal\n  F1 or ?   Toggle help\n  Tab       Next focus\n  Shift+Tab Previous focus\n  Esc       Dismiss/quit\n\nSidebar\n  j/k       Move screens\n  Enter     Open screen\n\nChat\n  Enter     Send prompt\n  j/k       Scroll chat (main focus)\n\nModels\n  j/k       Move models\n  Enter     Load model\n  x         Remove highlighted model\n\nSettings\n  j/k       Move field\n  h/l       Adjust value\n  Enter     Apply settings\n  r         Reset draft\n  Type      Edit system prompt field",
             )
             .block(
                 ratatui::widgets::Block::bordered()

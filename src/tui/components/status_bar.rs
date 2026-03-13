@@ -40,6 +40,16 @@ impl Widget for StatusBar<'_> {
 
         x += 1;
 
+        let help_text = " F1:Help ";
+        for c in help_text.chars() {
+            if x < content_area.x + content_area.width {
+                buf[(x, y)].set_char(c).set_style(ACCENT_CYAN);
+                x += 1;
+            }
+        }
+
+        x += 1;
+
         let focus_text = match self.state.focus_area {
             FocusArea::Sidebar => " Focus:Nav ",
             FocusArea::Main => " Focus:Main ",
