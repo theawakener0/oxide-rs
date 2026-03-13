@@ -40,7 +40,7 @@ impl Widget for StatusBar<'_> {
 
         x += 1;
 
-        let help_text = " F1:Help ";
+        let help_text = " ?:Help ";
         for c in help_text.chars() {
             if x < content_area.x + content_area.width {
                 buf[(x, y)].set_char(c).set_style(ACCENT_CYAN);
