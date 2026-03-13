@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, Widget},
 };
 
-use crate::tui::state::AppState;
+use crate::tui::state::{AppState, FocusArea};
 use crate::tui::theme::{
     ACCENT_CYAN, ERROR_RED, IRON_GRAY, RUST_ORANGE, SUCCESS_GREEN, TEXT_SECONDARY,
 };
@@ -34,6 +34,20 @@ impl Widget for StatusBar<'_> {
         for c in screen_text.chars() {
             if x < content_area.x + content_area.width {
                 buf[(x, y)].set_char(c).set_style(RUST_ORANGE);
+                x += 1;
+            }
+        }
+
+        x += 1;
+
+        let focus_text = match self.state.focus_area {
+            FocusArea::Sidebar => " Focus:Nav ",
+            FocusArea::Main => " Focus:Main ",
+            FocusArea::Input => " Focus:Input ",
+        };
+        for c in focus_text.chars() {
+            if x < content_area.x + content_area.width {
+                buf[(x, y)].set_char(c).set_style(ACCENT_CYAN);
                 x += 1;
             }
         }
@@ -86,6 +100,17 @@ impl Widget for StatusBar<'_> {
             if x < content_area.x + content_area.width {
                 buf[(x, y)].set_char(c).set_style(TEXT_SECONDARY);
                 x += 1;
+            }
+        }
+
+        if self.state.settings_dirty {
+            x += 1;
+            let pending_text = " [pending apply] ";
+            for c in pending_text.chars() {
+                if x < content_area.x + content_area.width {
+                    buf[(x, y)].set_char(c).set_style(ACCENT_CYAN);
+                    x += 1;
+                }
             }
         }
 

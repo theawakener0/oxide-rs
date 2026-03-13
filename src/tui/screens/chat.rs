@@ -52,7 +52,9 @@ impl Widget for ChatScreen {
         lines.push((format!("Model: {}", active_model), TEXT_SECONDARY));
         lines.push((String::new(), TEXT_SECONDARY));
 
-        for msg in state.messages.iter().rev().take(8).rev() {
+        let visible_messages = state.messages.len().saturating_sub(8 + state.chat_scroll);
+        let end = state.messages.len().saturating_sub(state.chat_scroll);
+        for msg in state.messages[visible_messages..end].iter() {
             let header = match msg.role {
                 MessageRole::User => ("You", RUST_ORANGE),
                 MessageRole::Assistant => ("Assistant", ACCENT_CYAN),
@@ -67,6 +69,13 @@ impl Widget for ChatScreen {
                 }
             }
             lines.push((String::new(), TEXT_SECONDARY));
+        }
+
+        if state.chat_scroll > 0 {
+            lines.push((
+                format!("[scrolled up {}]", state.chat_scroll),
+                TEXT_SECONDARY,
+            ));
         }
 
         let mut y = content_area.y;

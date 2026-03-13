@@ -1,12 +1,14 @@
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     text::Line,
     widgets::{Block, List, ListItem, Paragraph, Widget},
 };
 
 use crate::tui::app::App;
-use crate::tui::theme::{ERROR_RED, IRON_GRAY, TEXT_PRIMARY, TEXT_SECONDARY};
+use crate::tui::theme::{
+    ACCENT_CYAN, ERROR_RED, IRON_GRAY, RUST_ORANGE, TEXT_PRIMARY, TEXT_SECONDARY,
+};
 use crate::{format_size, list_models};
 
 pub struct ModelsScreen;
@@ -53,23 +55,26 @@ impl Widget for ModelsScreen {
         }
 
         let state = App::current_state();
+        let sections = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(content_area);
 
         let items: Vec<ListItem> = models
             .iter()
             .enumerate()
             .map(|(idx, m)| {
-                let quant = m.quantization.as_deref().unwrap_or("Unknown");
+                let is_active = state.model_path.as_ref() == Some(&m.path);
                 let marker = if idx == state.selected_model_index {
                     ">"
                 } else {
                     " "
                 };
+                let active = if is_active { "*" } else { " " };
                 let line = format!(
-                    "{} {} ({}) - {}",
+                    "{}{} {} ({})",
                     marker,
+                    active,
                     m.id,
-                    format_size(m.size_bytes),
-                    quant
+                    m.quantization.as_deref().unwrap_or("Unknown")
                 );
                 ListItem::new(Line::from(line))
             })
@@ -77,6 +82,34 @@ impl Widget for ModelsScreen {
 
         List::new(items)
             .style(TEXT_PRIMARY)
-            .render(content_area, buf);
+            .render(sections[0], buf);
+
+        if let Some(model) = models.get(state.selected_model_index) {
+            let active = if state.model_path.as_ref() == Some(&model.path) {
+                "Yes"
+            } else {
+                "No"
+            };
+            let preview = format!(
+                "Highlighted\n\nID:          {}\nRepo:        {}\nFile:        {}\nQuant:       {}\nSize:        {}\nDownloaded:  {}\nActive:      {}\n\nActions\n\nEnter: load model\nx: remove model\nd: download hint\nj/k: move selection\nTab: switch focus",
+                model.id,
+                model.repo_id,
+                model.filename,
+                model.quantization.as_deref().unwrap_or("Unknown"),
+                format_size(model.size_bytes),
+                model.downloaded_at.format("%Y-%m-%d %H:%M"),
+                active,
+            );
+
+            let color = if state.model_path.as_ref() == Some(&model.path) {
+                RUST_ORANGE
+            } else {
+                ACCENT_CYAN
+            };
+
+            Paragraph::new(preview)
+                .style(color)
+                .render(sections[1], buf);
+        }
     }
 }

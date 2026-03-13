@@ -14,8 +14,8 @@ use crate::tui::components::status_bar::StatusBar;
 use crate::tui::screens::chat::ChatScreen;
 use crate::tui::screens::models::ModelsScreen;
 use crate::tui::screens::settings::SettingsScreen;
-use crate::tui::state::{AppState, NotificationLevel, Screen};
-use crate::{GenerateOptions, Model};
+use crate::tui::state::{AppState, FocusArea, NotificationLevel, Screen};
+use crate::{list_models, unregister_model, GenerateOptions, Model};
 
 static APP_STATE: Mutex<Option<AppState>> = Mutex::new(None);
 
@@ -23,6 +23,10 @@ enum WorkerCommand {
     LoadModel {
         path: PathBuf,
         options: GenerateOptions,
+    },
+    UpdateOptions {
+        options: GenerateOptions,
+        reload_model: bool,
     },
     Generate {
         prompt: String,
@@ -40,6 +44,8 @@ enum WorkerEvent {
     GenerationFinished,
     Error(String),
 }
+
+const SETTINGS_FIELD_COUNT: usize = 8;
 
 pub struct App {
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -194,6 +200,58 @@ impl App {
                         }
                     }
                 }
+                WorkerCommand::UpdateOptions {
+                    options,
+                    reload_model,
+                } => {
+                    if reload_model {
+                        let Some(path) = current_path.clone() else {
+                            let _ = tx.send(WorkerEvent::Error("No model loaded".to_string()));
+                            continue;
+                        };
+
+                        let label = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("model")
+                            .to_string();
+                        let _ = tx.send(WorkerEvent::ModelLoadStarted(label));
+
+                        match Model::new(&path).map(|m| m.with_options(options)) {
+                            Ok(mut loaded) => match loaded.load() {
+                                Ok(_) => {
+                                    let used = loaded.context_used().unwrap_or(0);
+                                    let limit = loaded.context_limit().unwrap_or(0);
+                                    model = Some(loaded);
+                                    let _ = tx.send(WorkerEvent::ModelLoaded { path });
+                                    let _ = tx.send(WorkerEvent::ContextUpdated { used, limit });
+                                }
+                                Err(err) => {
+                                    let _ = tx.send(WorkerEvent::Error(format!(
+                                        "Failed to reload model: {}",
+                                        err
+                                    )));
+                                }
+                            },
+                            Err(err) => {
+                                let _ = tx.send(WorkerEvent::Error(format!(
+                                    "Failed to initialize model: {}",
+                                    err
+                                )));
+                            }
+                        }
+                    } else if let Some(path) = current_path.clone() {
+                        model = Model::new(&path).ok().map(|m| m.with_options(options));
+                        if let Some(active_model) = model.as_mut() {
+                            if active_model.load().is_ok() {
+                                let _ = tx.send(WorkerEvent::ContextUpdated {
+                                    used: active_model.context_used().unwrap_or(0),
+                                    limit: active_model.context_limit().unwrap_or(0),
+                                });
+                            }
+                        }
+                    }
+                }
                 WorkerCommand::Shutdown => break,
             }
         }
@@ -217,6 +275,8 @@ impl App {
                     if let Some(state) = state_guard.as_mut() {
                         state.model_path = Some(path.clone());
                         state.is_loading_model = false;
+                        state.options = state.draft_options.clone();
+                        state.settings_dirty = false;
                         state.set_notification(
                             NotificationLevel::Success,
                             format!(
@@ -310,7 +370,29 @@ impl App {
             return Ok(());
         }
 
+        if matches!(key.code, KeyCode::Char('?')) {
+            let mut state_guard = Self::state_mut();
+            if let Some(state) = state_guard.as_mut() {
+                state.show_help = !state.show_help;
+            }
+            return Ok(());
+        }
+
         let state = Self::current_state();
+        if state.show_help {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+                let mut state_guard = Self::state_mut();
+                if let Some(state) = state_guard.as_mut() {
+                    state.show_help = false;
+                }
+            }
+            return Ok(());
+        }
+
+        if state.focus_area == crate::tui::state::FocusArea::Sidebar {
+            return self.handle_sidebar_input(key.code);
+        }
+
         match state.current_screen {
             Screen::Chat => self.handle_chat_input(key.code),
             Screen::Models => self.handle_models_input(key.code),
@@ -320,9 +402,57 @@ impl App {
         Ok(())
     }
 
+    fn handle_sidebar_input(&mut self, code: KeyCode) -> Result<()> {
+        let mut state_guard = Self::state_mut();
+        let state = state_guard.as_mut().unwrap();
+
+        match code {
+            KeyCode::Tab => state.cycle_focus_forward(),
+            KeyCode::BackTab => state.cycle_focus_backward(),
+            KeyCode::Down | KeyCode::Char('j') => state.select_next_screen(),
+            KeyCode::Up | KeyCode::Char('k') => state.select_prev_screen(),
+            KeyCode::Enter => {
+                let screen = state.sidebar_selected_screen;
+                state.set_current_screen(screen);
+            }
+            KeyCode::Esc => {
+                if state.notification.is_some() {
+                    state.clear_notification();
+                } else {
+                    self.should_quit = true;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     fn handle_chat_input(&mut self, code: KeyCode) {
         let mut state_guard = Self::state_mut();
         let state = state_guard.as_mut().unwrap();
+
+        if state.focus_area == FocusArea::Main {
+            match code {
+                KeyCode::Tab => state.cycle_focus_forward(),
+                KeyCode::BackTab => state.cycle_focus_backward(),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.chat_scroll = state.chat_scroll.saturating_add(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.chat_scroll = state.chat_scroll.saturating_sub(1);
+                }
+                KeyCode::Esc => {
+                    if state.notification.is_some() {
+                        state.clear_notification();
+                    } else {
+                        self.should_quit = true;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
 
         if state.is_loading_model || state.is_generating {
             if matches!(code, KeyCode::Esc) {
@@ -336,8 +466,8 @@ impl App {
         }
 
         match code {
-            KeyCode::Tab => state.current_screen = state.current_screen.next(),
-            KeyCode::BackTab => state.current_screen = state.current_screen.prev(),
+            KeyCode::Tab => state.cycle_focus_forward(),
+            KeyCode::BackTab => state.cycle_focus_backward(),
             KeyCode::Esc => {
                 if state.notification.is_some() {
                     state.clear_notification();
@@ -355,6 +485,7 @@ impl App {
                     let prompt = self.input.value().to_string();
                     self.input.clear();
                     state.add_user_message(&prompt);
+                    state.chat_scroll = 0;
                     state.tokens_generated = 0;
                     state.tokens_per_second = 0.0;
                     state.start_assistant_message();
@@ -372,8 +503,8 @@ impl App {
         let state = state_guard.as_mut().unwrap();
 
         match code {
-            KeyCode::Tab => state.current_screen = state.current_screen.next(),
-            KeyCode::BackTab => state.current_screen = state.current_screen.prev(),
+            KeyCode::Tab => state.cycle_focus_forward(),
+            KeyCode::BackTab => state.cycle_focus_backward(),
             KeyCode::Down | KeyCode::Char('j') => {
                 if let Ok(models) = crate::list_models() {
                     state.select_next_model(models.len());
@@ -394,6 +525,45 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('x') => {
+                if let Ok(models) = list_models() {
+                    if let Some(model) = models.get(state.selected_model_index) {
+                        let model_id = model.id.clone();
+                        let was_active = state.model_path.as_ref() == Some(&model.path);
+                        match unregister_model(&model_id) {
+                            Ok(Some(_)) => {
+                                if was_active {
+                                    state.model_path = None;
+                                    state.context_used = 0;
+                                    state.context_limit = 0;
+                                }
+                                state.set_notification(
+                                    NotificationLevel::Success,
+                                    format!("Removed model: {}", model_id),
+                                );
+                            }
+                            Ok(None) => {
+                                state.set_notification(
+                                    NotificationLevel::Error,
+                                    format!("Model not found: {}", model_id),
+                                );
+                            }
+                            Err(err) => {
+                                state.set_notification(
+                                    NotificationLevel::Error,
+                                    format!("Failed to remove model: {}", err),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                state.set_notification(
+                    NotificationLevel::Info,
+                    "Type a HuggingFace repo id in the chat input and use /download <repo> support next.",
+                );
+            }
             KeyCode::Esc => {
                 if state.notification.is_some() {
                     state.clear_notification();
@@ -410,8 +580,57 @@ impl App {
         let state = state_guard.as_mut().unwrap();
 
         match code {
-            KeyCode::Tab => state.current_screen = state.current_screen.next(),
-            KeyCode::BackTab => state.current_screen = state.current_screen.prev(),
+            KeyCode::Tab => state.cycle_focus_forward(),
+            KeyCode::BackTab => state.cycle_focus_backward(),
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.settings_selected_field =
+                    (state.settings_selected_field + 1).min(SETTINGS_FIELD_COUNT - 1);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.settings_selected_field = state.settings_selected_field.saturating_sub(1);
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                adjust_setting(state, -1);
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                adjust_setting(state, 1);
+            }
+            KeyCode::Char('r') => {
+                state.sync_draft_options();
+            }
+            KeyCode::Backspace => {
+                if state.settings_selected_field == 7 {
+                    if let Some(prompt) = state.draft_options.system_prompt.as_mut() {
+                        prompt.pop();
+                    }
+                    state.mark_settings_dirty();
+                }
+            }
+            KeyCode::Char(c) => {
+                if state.settings_selected_field == 7 {
+                    let prompt = state
+                        .draft_options
+                        .system_prompt
+                        .get_or_insert_with(String::new);
+                    prompt.push(c);
+                    state.mark_settings_dirty();
+                }
+            }
+            KeyCode::Enter => {
+                if state.settings_selected_field == 7 {
+                    state.mark_settings_dirty();
+                } else if state.settings_dirty {
+                    state.options = state.draft_options.clone();
+                    state.settings_dirty = false;
+                    let options = state.options.clone();
+                    let reload_model = true;
+                    let _ = self.worker_tx.send(WorkerCommand::UpdateOptions {
+                        options,
+                        reload_model,
+                    });
+                    state.set_notification(NotificationLevel::Info, "Applying settings...");
+                }
+            }
             KeyCode::Esc => {
                 if state.notification.is_some() {
                     state.clear_notification();
@@ -440,7 +659,13 @@ impl App {
                 .split(vertical[0]);
 
         f.render_widget(
-            Sidebar::new(screens, state.current_screen, sidebar_width),
+            Sidebar::new(
+                screens,
+                state.current_screen,
+                state.sidebar_selected_screen,
+                state.focus_area,
+                sidebar_width,
+            ),
             horizontal[0],
         );
 
@@ -475,5 +700,62 @@ impl App {
             };
             f.render_widget(notif, notif_area);
         }
+
+        if state.show_help {
+            let help_area = ratatui::layout::Rect::new(
+                area.x + area.width / 6,
+                area.y + area.height / 6,
+                area.width * 2 / 3,
+                area.height * 2 / 3,
+            );
+            let help = ratatui::widgets::Paragraph::new(
+                "Shortcuts\n\nGlobal\n  ?         Toggle help\n  Tab       Next focus\n  Shift+Tab Previous focus\n  Esc       Dismiss/quit\n\nSidebar\n  j/k       Move screens\n  Enter     Open screen\n\nChat\n  Enter     Send prompt\n  j/k       Scroll chat (main focus)\n\nModels\n  j/k       Move models\n  Enter     Load model\n  x         Remove highlighted model\n\nSettings\n  j/k       Move field\n  h/l       Adjust value\n  Enter     Apply settings\n  r         Reset draft\n  Type      Edit system prompt field",
+            )
+            .block(
+                ratatui::widgets::Block::bordered()
+                    .border_type(ratatui::widgets::BorderType::Double)
+                    .title(" Help "),
+            );
+            f.render_widget(help, help_area);
+        }
     }
+}
+
+fn adjust_setting(state: &mut AppState, direction: i32) {
+    match state.settings_selected_field {
+        0 => {
+            state.draft_options.temperature =
+                (state.draft_options.temperature + (direction as f64 * 0.1)).clamp(0.0, 2.0);
+        }
+        1 => {
+            let current = state.draft_options.top_p.unwrap_or(1.0);
+            let next = (current + (direction as f64 * 0.05)).clamp(0.05, 1.0);
+            state.draft_options.top_p = Some(next);
+        }
+        2 => {
+            let current = state.draft_options.top_k.unwrap_or(40) as i32;
+            let next = (current + direction * 5).clamp(1, 200) as usize;
+            state.draft_options.top_k = Some(next);
+        }
+        3 => {
+            let current = state.draft_options.max_tokens as i32;
+            state.draft_options.max_tokens = (current + direction * 32).clamp(32, 4096) as usize;
+        }
+        4 => {
+            state.draft_options.repeat_penalty =
+                (state.draft_options.repeat_penalty + (direction as f32 * 0.05)).clamp(1.0, 2.0);
+        }
+        5 => {
+            let current = state.draft_options.repeat_last_n as i32;
+            state.draft_options.repeat_last_n = (current + direction * 8).clamp(0, 512) as usize;
+        }
+        6 => {
+            let current = state.draft_options.batch_size as i32;
+            state.draft_options.batch_size = (current + direction * 8).clamp(8, 512) as usize;
+        }
+        7 => {}
+        _ => {}
+    }
+
+    state.mark_settings_dirty();
 }
