@@ -3,6 +3,7 @@ use ratatui::{
     layout::Rect,
     widgets::{Block, Paragraph, Widget},
 };
+use std::time::Duration;
 
 use crate::tui::state::MessageRole;
 use crate::tui::theme::{ACCENT_CYAN, FERRIS_ORANGE, RUST_ORANGE, TEXT_PRIMARY, TEXT_SECONDARY};
@@ -58,7 +59,8 @@ impl Widget for ChatScreen {
             };
             lines.push((header.0.to_string(), header.1));
             if msg.is_thinking {
-                lines.push(("Thinking...".to_string(), FERRIS_ORANGE));
+                let spinner = spinner_frame(msg.timestamp.elapsed());
+                lines.push((format!("{} Thinking...", spinner), FERRIS_ORANGE));
             } else {
                 for line in wrap_text(&msg.content, content_area.width.saturating_sub(1) as usize) {
                     lines.push((line, TEXT_PRIMARY));
@@ -108,4 +110,10 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+fn spinner_frame(elapsed: Duration) -> &'static str {
+    const FRAMES: [&str; 8] = ["-", "\\", "|", "/", "-", "\\", "|", "/"];
+    let frame = ((elapsed.as_millis() / 120) as usize) % FRAMES.len();
+    FRAMES[frame]
 }

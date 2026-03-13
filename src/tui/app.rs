@@ -33,6 +33,7 @@ enum WorkerCommand {
 enum WorkerEvent {
     ModelLoadStarted(String),
     ModelLoaded { path: PathBuf },
+    ContextUpdated { used: usize, limit: usize },
     FirstToken,
     Token(String),
     GenerationStarted,
@@ -96,6 +97,12 @@ impl App {
     pub fn run(&mut self) -> Result<()> {
         loop {
             self.process_worker_events();
+            {
+                let mut state_guard = Self::state_mut();
+                if let Some(state) = state_guard.as_mut() {
+                    state.clear_expired_notification();
+                }
+            }
 
             let state = Self::current_state();
             let input = self.input.clone();
@@ -129,9 +136,12 @@ impl App {
                     match Model::new(&path).map(|m| m.with_options(options)) {
                         Ok(mut loaded) => match loaded.load() {
                             Ok(_) => {
+                                let used = loaded.context_used().unwrap_or(0);
+                                let limit = loaded.context_limit().unwrap_or(0);
                                 current_path = Some(path.clone());
                                 model = Some(loaded);
                                 let _ = tx.send(WorkerEvent::ModelLoaded { path });
+                                let _ = tx.send(WorkerEvent::ContextUpdated { used, limit });
                             }
                             Err(err) => {
                                 let _ = tx.send(WorkerEvent::Error(format!(
@@ -158,6 +168,11 @@ impl App {
                         let _ = tx.send(WorkerEvent::GenerationStarted);
                     }
 
+                    let _ = tx.send(WorkerEvent::ContextUpdated {
+                        used: active_model.context_used().unwrap_or(0),
+                        limit: active_model.context_limit().unwrap_or(0),
+                    });
+
                     let mut saw_first_token = false;
                     match active_model.generate_stream(&prompt, |token| {
                         if !saw_first_token {
@@ -167,6 +182,10 @@ impl App {
                         let _ = tx.send(WorkerEvent::Token(token));
                     }) {
                         Ok(_) => {
+                            let _ = tx.send(WorkerEvent::ContextUpdated {
+                                used: active_model.context_used().unwrap_or(0),
+                                limit: active_model.context_limit().unwrap_or(0),
+                            });
                             let _ = tx.send(WorkerEvent::GenerationFinished);
                         }
                         Err(err) => {
@@ -205,6 +224,13 @@ impl App {
                                 path.file_name().and_then(|s| s.to_str()).unwrap_or("model")
                             ),
                         );
+                    }
+                }
+                WorkerEvent::ContextUpdated { used, limit } => {
+                    let mut state_guard = Self::state_mut();
+                    if let Some(state) = state_guard.as_mut() {
+                        state.context_used = used;
+                        state.context_limit = limit;
                     }
                 }
                 WorkerEvent::GenerationStarted => {

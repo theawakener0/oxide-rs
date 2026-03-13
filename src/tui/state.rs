@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::GenerateOptions;
 
@@ -60,13 +61,15 @@ pub enum NotificationLevel {
 pub struct NotificationState {
     pub level: NotificationLevel,
     pub message: String,
+    pub shown_at: Instant,
+    pub ttl: Option<Duration>,
 }
 
 #[derive(Clone)]
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
-    pub timestamp: std::time::Instant,
+    pub timestamp: Instant,
     pub is_thinking: bool,
 }
 
@@ -75,7 +78,7 @@ impl ChatMessage {
         Self {
             role: MessageRole::User,
             content: content.into(),
-            timestamp: std::time::Instant::now(),
+            timestamp: Instant::now(),
             is_thinking: false,
         }
     }
@@ -84,7 +87,7 @@ impl ChatMessage {
         Self {
             role: MessageRole::Assistant,
             content: String::new(),
-            timestamp: std::time::Instant::now(),
+            timestamp: Instant::now(),
             is_thinking: true,
         }
     }
@@ -164,14 +167,38 @@ impl AppState {
     }
 
     pub fn set_notification(&mut self, level: NotificationLevel, message: impl Into<String>) {
+        let ttl = match level {
+            NotificationLevel::Error => None,
+            NotificationLevel::Info => Some(Duration::from_secs(2)),
+            NotificationLevel::Success => Some(Duration::from_secs(2)),
+        };
+
         self.notification = Some(NotificationState {
             level,
             message: message.into(),
+            shown_at: Instant::now(),
+            ttl,
         });
     }
 
     pub fn clear_notification(&mut self) {
         self.notification = None;
+    }
+
+    pub fn clear_expired_notification(&mut self) {
+        let should_clear = self
+            .notification
+            .as_ref()
+            .and_then(|notification| {
+                notification
+                    .ttl
+                    .map(|ttl| notification.shown_at.elapsed() >= ttl)
+            })
+            .unwrap_or(false);
+
+        if should_clear {
+            self.notification = None;
+        }
     }
 
     pub fn select_next_model(&mut self, total: usize) {
