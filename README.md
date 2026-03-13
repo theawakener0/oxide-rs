@@ -1,6 +1,6 @@
 # oxide-rs
 
-A high-performance, memory-safe, and lightweight LLM inference engine written in pure Rust. Optimized for CPU-based inference and inspired by the efficiency of llama.cpp. 
+A high-performance, memory-safe, and lightweight LLM inference engine written in pure Rust. Optimized for CPU-based inference and inspired by the efficiency of llama.cpp.
 
 ## Why oxide-rs
 
@@ -56,6 +56,29 @@ Adjust sampling:
 oxide-rs --model /path/to/model.gguf --temperature 0.8 --top-k 40 --top-p 0.9
 ```
 
+## TUI (Terminal UI)
+
+The TUI provides an interactive sidebar-driven interface with:
+
+- Chat screen with live streaming and thinking spinner
+- Models screen with selection and active/highlighted markers
+- Settings screen for generation parameters and system prompt editing
+
+Run the TUI:
+
+```bash
+oxide-rs --tui --model /path/to/model.gguf
+```
+
+Shortcuts:
+
+- `F1` or `?` — toggle help/shortcuts overlay
+- `Tab` / `Shift+Tab` — cycle focus between sidebar, main panel, and input
+- Sidebar: `j` / `k` to select, `Enter` to open a screen
+- Chat: `Enter` to send prompt; `j`/`k` scrolls history when main panel focused
+- Models: `j`/`k` to move, `Enter` to load, `x` to remove, `d` shows download hint
+- Settings: `j`/`k` to choose field, `h`/`l` to adjust, `Enter` to apply, `r` to reset, type to edit system prompt
+
 ## Common commands
 
 ```bash
@@ -103,11 +126,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Docs
 
-- `docs/getting-started.md` - installation, CLI workflows, model management
-- `docs/api-reference.md` - CLI flags, interactive commands, library API
-- `docs/library-usage.md` - embedding Oxide in Rust code
-- `docs/examples.md` - usage patterns and code snippets
-- `docs/architecture.md` - internals, supported models, performance notes
+- [docs/getting-started.md](docs/getting-started.md) - installation, CLI workflows, model management
+- [docs/api-reference.md](docs/api-reference.md) - CLI flags, interactive commands, library API
+- [docs/library-usage.md](docs/library-usage.md) - embedding Oxide in Rust code
+- [docs/examples.md](docs/examples.md) - usage patterns and code snippets
+- [docs/architecture.md](docs/architecture.md) - internals, supported models, performance notes
 
 ## License
 
