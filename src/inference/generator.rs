@@ -208,6 +208,10 @@ pub struct Generator {
 }
 
 impl Generator {
+    fn encode_chat_text(&self, text: &str) -> Result<Vec<u32>> {
+        self.tokenizer.encode(text)
+    }
+
     fn conversation_messages(&self) -> Vec<Message> {
         let mut messages =
             Vec::with_capacity(self.messages.len() + usize::from(self.system_prompt.is_some()));
@@ -229,7 +233,7 @@ impl Generator {
         }
 
         let rendered = self.template.apply(&messages, false)?;
-        self.token_history = self.tokenizer.encode_raw(&rendered)?;
+        self.token_history = self.encode_chat_text(&rendered)?;
         Ok(())
     }
 
@@ -383,7 +387,7 @@ impl Generator {
         loop {
             let owned = self.conversation_messages();
             let prompt_text = self.template.apply(&owned, true)?;
-            let prompt_tokens = self.tokenizer.encode_raw(&prompt_text)?;
+            let prompt_tokens = self.encode_chat_text(&prompt_text)?;
 
             let total_len = prompt_tokens.len() + max_tokens;
             if total_len <= self.metadata.context_length {
@@ -631,7 +635,7 @@ impl Generator {
 
         let prompt_tokens_list: Vec<Vec<u32>> = prompt_texts
             .iter()
-            .map(|text| self.tokenizer.encode_raw(text))
+            .map(|text| self.encode_chat_text(text))
             .collect::<Result<Vec<_>>>()?;
 
         let mut results = Vec::with_capacity(prompts.len());
