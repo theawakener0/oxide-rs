@@ -7,7 +7,7 @@ This guide covers how to use oxide-rs as a library in your Rust projects.
 ```toml
 # Cargo.toml
 [dependencies]
-oxide-rs = "0.1.15"
+oxide-rs = "0.1.16"
 ```
 
 ## Core Concepts
