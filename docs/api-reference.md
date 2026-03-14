@@ -35,6 +35,14 @@ Reference for the Oxide CLI and Rust library.
 | `--batch-window-ms <n>` | `100` | Dynamic batching window |
 | `--simd <level>` | `auto` | `auto`, `avx512`, `avx2`, `neon`, `scalar` |
 
+### Server
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--server` | `false` | Run as HTTP server |
+| `--port <n>` | `8080` | Server port |
+| `--host <addr>` | `0.0.0.0` | Server bind address |
+
 Notes:
 
 - CLI defaults shown here are the command-line defaults.
@@ -182,6 +190,112 @@ pub struct GgufMetadata {
     pub context_length: usize,
     pub file_size: u64,
     pub chat_template: Option<String>,
+}
+```
+
+## Server
+
+Run the server with `oxide-rs --server`. The server provides OpenAI-compatible HTTP endpoints.
+
+### Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/v1/chat/completions` | Create a chat completion |
+| GET | `/v1/models` | List available models |
+
+### Chat Completions
+
+**Request:**
+
+```json
+{
+  "model": "/path/to/model.gguf",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello!"}
+  ],
+  "temperature": 0.3,
+  "max_tokens": 512,
+  "stream": false
+}
+```
+
+**Parameters:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | string | required | Path to GGUF model file |
+| `messages` | array | required | Array of message objects |
+| `messages[].role` | string | required | `system`, `user`, or `assistant` |
+| `messages[].content` | string | required | Message content |
+| `temperature` | number | 0.3 | Sampling temperature |
+| `top_p` | number | null | Nucleus sampling |
+| `max_tokens` | number | 512 | Maximum tokens to generate |
+| `stream` | boolean | false | Enable streaming |
+| `seed` | number | 299792458 | Random seed |
+
+**Response (non-streaming):**
+
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "/path/to/model.gguf",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I help you?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 8,
+    "total_tokens": 18
+  }
+}
+```
+
+**Streaming response:**
+
+Each chunk is a Server-Sent Event:
+
+```json
+data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+The server also sends a complete message before `[DONE]` for verification:
+
+```json
+data: {"id":"chatcmpl-abc123","object":"chat.completion","created":1234567890,"model":"...","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":8,"total_tokens":18}}
+
+data: [DONE]
+```
+
+### List Models
+
+**Response:**
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "/path/to/model.gguf",
+      "object": "model",
+      "owned_by": "oxide-rs",
+      "permission": [...]
+    }
+  ]
 }
 ```
 

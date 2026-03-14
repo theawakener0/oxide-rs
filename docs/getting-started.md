@@ -98,6 +98,40 @@ When running without `--once`, Oxide keeps conversation history and accepts thes
 | `/help` | Show available commands |
 | `/exit` or `/quit` | Exit the program |
 
+## OpenAI-Compatible Server
+
+Run oxide-rs as an OpenAI API-compatible HTTP server:
+
+```bash
+oxide-rs --server --port 8080
+```
+
+The server starts and listens on the specified port. Models are loaded lazily on first request and cached for subsequent requests.
+
+### Example usage
+
+```bash
+# Non-streaming request
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "/path/to/model.gguf",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Streaming request
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "/path/to/model.gguf",
+    "messages": [{"role": "user", "content": "Tell me a story"}],
+    "stream": true
+  }'
+
+# List loaded models
+curl http://localhost:8080/v1/models
+```
+
 ## Model management
 
 Show model repo details and available GGUF files:

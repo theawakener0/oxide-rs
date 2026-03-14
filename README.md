@@ -56,6 +56,46 @@ Adjust sampling:
 oxide-rs --model /path/to/model.gguf --temperature 0.8 --top-k 40 --top-p 0.9
 ```
 
+## OpenAI-Compatible Server
+
+Run oxide-rs as an OpenAI API-compatible HTTP server:
+
+```bash
+oxide-rs --server --port 8080
+```
+
+The server provides OpenAI-compatible endpoints:
+
+```bash
+# Chat completions (non-streaming)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "/path/to/model.gguf",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Chat completions (streaming)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "/path/to/model.gguf",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+
+# List available models
+curl http://localhost:8080/v1/models
+```
+
+Features:
+- Specify model path in request body (lazy loading)
+- Models are cached after first use
+- Streaming support with Server-Sent Events
+- OpenAI-compatible response format
+- CORS enabled for browser clients
+```
+
 ## TUI (Terminal UI)
 
 The TUI provides an interactive sidebar-driven interface with:
