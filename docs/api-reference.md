@@ -38,6 +38,7 @@ Reference for the Oxide CLI and Rust library.
 Notes:
 
 - CLI defaults shown here are the command-line defaults.
+- You can use TUI by typing `--tui`.
 - Library defaults for `GenerateOptions` differ for some batching-related fields because they come from the crate API rather than the CLI wrapper.
 
 ### Interactive commands
@@ -186,7 +187,7 @@ pub struct GgufMetadata {
 
 ## More
 
-- `docs/getting-started.md` for CLI workflows
-- `docs/library-usage.md` for deeper library examples
-- `docs/examples.md` for sample programs
-- `docs/architecture.md` for implementation details
+- [docs/getting-started.md](docs/getting-started.md) for CLI workflows
+- [docs/library-usage.md](docs/library-usage.md) for deeper library examples
+- [docs/examples.md](docs/examples.md) for sample programs
+- [docs/architecture.md](docs/architecture.md) for implementation details

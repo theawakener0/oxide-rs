@@ -325,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("No metadata available");
 
     println!("╔══════════════════════════════════════╗");
-    println!("║         Model Information           ║");
+    println!("║         Model Information            ║");
     println!("╠══════════════════════════════════════╣");
     println!("║ Name:         {:24}║", meta.name);
     println!("║ Architecture: {:24}║", meta.architecture);
@@ -407,3 +407,5 @@ fn handle_request(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
     model.generate(prompt)
 }
 ```
+
+

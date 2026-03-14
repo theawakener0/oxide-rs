@@ -258,3 +258,5 @@ fn main() {
 5. **Set appropriate repeat_penalty** - Higher values (1.2+) reduce repetition but may affect coherence
 6. **Monitor context** - Use `context_used()` and `context_percentage()` to avoid exceeding limits
 7. **Clear history when needed** - Call `clear_history()` to reset context for new conversations
+
+

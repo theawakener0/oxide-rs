@@ -157,7 +157,7 @@ cargo test
 
 ## Next
 
-- `docs/api-reference.md` for CLI flags and library surface
-- `docs/library-usage.md` for embedding Oxide in Rust code
-- `docs/examples.md` for concrete code samples
-- `docs/architecture.md` for internals and performance notes
+- [docs/api-reference.md](docs/api-reference.md) for CLI flags and library surface
+- [docs/library-usage.md](docs/library-usage.md) for embedding Oxide in Rust code
+- [docs/examples.md](docs/examples.md) for concrete code samples
+- [docs/architecture.md](docs/architecture.md) for internals and performance notes
