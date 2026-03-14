@@ -16,6 +16,7 @@ use oxide_rs::model::download::find_gguf_file;
 use oxide_rs::model::{
     download_model, format_size, get_model_info, list_models, register_model, unregister_model,
 };
+use oxide_rs::server::run as server_run;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -108,6 +109,18 @@ struct Cli {
     /// Launch TUI mode instead of CLI chat
     #[arg(short, long)]
     tui: bool,
+
+    /// Run as OpenAI-compatible HTTP server
+    #[arg(long)]
+    server: bool,
+
+    /// Port for HTTP server (default: 8080)
+    #[arg(long, default_value = "8080")]
+    port: u16,
+
+    /// Host for HTTP server (default: 0.0.0.0)
+    #[arg(long, default_value = "0.0.0.0")]
+    host: String,
 }
 
 fn main() -> Result<()> {
@@ -143,6 +156,14 @@ fn main() -> Result<()> {
 
     if cli.tui {
         oxide_rs::tui::run(cli.model.clone(), cli.download.clone())?;
+        return Ok(());
+    }
+
+    if cli.server {
+        let runtime = tokio::runtime::Runtime::new()?;
+        if let Err(e) = runtime.block_on(server_run(cli.host, cli.port)) {
+            eprintln!("Server error: {}", e);
+        }
         return Ok(());
     }
 
