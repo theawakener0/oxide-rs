@@ -16,7 +16,7 @@ pub async fn run(host: String, port: u16) -> Result<(), Box<dyn std::error::Erro
     println!();
     println!("┌─────────────────────────────────────────────┐");
     println!("│  oxide-rs - OpenAI Compatible Server        │");
-    println!("│  Version: {}                                │", env!("CARGO_PKG_VERSION"));
+    println!("│  Version: {}                        │", env!("CARGO_PKG_VERSION"));
     println!("└─────────────────────────────────────────────┘");
     println!();
     tracing::info!("Server starting on http://{}", addr);
