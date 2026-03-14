@@ -153,7 +153,7 @@ Areas already hinted at in the codebase and docs:
 
 ## Related docs
 
-- [docs/getting-started.md](docs/getting-started.md)
-- [docs/api-reference.md](docs/api-reference.md)
-- [docs/library-usage.md](docs/library-usage.md)
-- [docs/examples.md](docs/examples.md)
+- [getting-started.md](getting-started.md)
+- [api-reference.md](api-reference.md)
+- [library-usage.md](library-usage.md)
+- [examples.md](examples.md)

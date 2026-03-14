@@ -301,7 +301,7 @@ data: [DONE]
 
 ## More
 
-- [docs/getting-started.md](docs/getting-started.md) for CLI workflows
-- [docs/library-usage.md](docs/library-usage.md) for deeper library examples
-- [docs/examples.md](docs/examples.md) for sample programs
-- [docs/architecture.md](docs/architecture.md) for implementation details
+- [getting-started.md](getting-started.md) for CLI workflows
+- [library-usage.md](library-usage.md) for deeper library examples
+- [examples.md](examples.md) for sample programs
+- [architecture.md](architecture.md) for implementation details
