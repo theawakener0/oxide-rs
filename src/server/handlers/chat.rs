@@ -21,11 +21,24 @@ pub async fn chat_completions(
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<impl axum::response::IntoResponse, OpenAIError> {
     let is_streaming = req.stream.unwrap_or(false);
+    let request_id = create_completion_id();
+    let model_path = req.model.clone();
+    let temperature = req.temperature;
+    let max_tokens = req.max_tokens;
+
+    tracing::info!(
+        "[{}] Request: POST /v1/chat/completions | model: {} | temp: {:.2} | max_tokens: {} | stream: {}",
+        &request_id[..8],
+        model_path,
+        temperature,
+        max_tokens,
+        is_streaming
+    );
 
     if is_streaming {
-        Ok(ChatResponse::Streaming(handle_streaming(state, req).await?))
+        Ok(ChatResponse::Streaming(handle_streaming(state, req, request_id).await?))
     } else {
-        Ok(ChatResponse::NonStreaming(handle_non_streaming(state, req).await?))
+        Ok(ChatResponse::NonStreaming(handle_non_streaming(state, req, request_id).await?))
     }
 }
 
@@ -46,6 +59,7 @@ impl IntoResponse for ChatResponse {
 async fn handle_non_streaming(
     state: Arc<AppState>,
     req: ChatCompletionRequest,
+    request_id: String,
 ) -> Result<Json<ChatCompletionResponse>, OpenAIError> {
     let model_path = &req.model;
     let generator = state.get_or_load_model(model_path).await?;
@@ -60,6 +74,15 @@ async fn handle_non_streaming(
     let prompt_tokens = prompt.split_whitespace().count();
     let mut completion_tokens = 0;
     let mut generated_text = String::new();
+
+    tracing::info!(
+        "[{}] Generation started | prompt: {} tokens | max: {}",
+        &request_id[..8],
+        prompt_tokens,
+        req.max_tokens
+    );
+
+    let start_time = std::time::Instant::now();
 
     {
         let mut gen = generator.lock().map_err(|e| OpenAIError::internal(&e.to_string()))?;
@@ -79,6 +102,21 @@ async fn handle_non_streaming(
         )
         .map_err(|e| OpenAIError::internal(&e.to_string()))?;
     }
+
+    let elapsed = start_time.elapsed();
+    let tokens_per_sec = if elapsed.as_secs_f32() > 0.0 {
+        completion_tokens as f32 / elapsed.as_secs_f32()
+    } else {
+        0.0
+    };
+
+    tracing::info!(
+        "[{}] Generation complete | output: {} tokens | time: {:.2}s | speed: {:.1} tok/s",
+        &request_id[..8],
+        completion_tokens,
+        elapsed.as_secs_f32(),
+        tokens_per_sec
+    );
 
     let response = ChatCompletionResponse {
         id: completion_id,
@@ -102,6 +140,7 @@ async fn handle_non_streaming(
 async fn handle_streaming(
     state: Arc<AppState>,
     req: ChatCompletionRequest,
+    request_id: String,
 ) -> Result<Sse<ReceiverStream<Result<Event, std::convert::Infallible>>>, OpenAIError> {
     let model_path = req.model.clone();
     let generator = state.get_or_load_model(&model_path).await?;
@@ -113,12 +152,26 @@ async fn handle_streaming(
     let repeat_last_n = 64usize;
     let max_tokens = req.max_tokens;
 
+    let prompt_tokens = prompt.split_whitespace().count();
+
+    tracing::info!(
+        "[{}] Streaming started | prompt: {} tokens | max: {}",
+        &request_id[..8],
+        prompt_tokens,
+        max_tokens
+    );
+
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(100);
 
     let model_clone = req.model.clone();
+    let request_id_clone = request_id.clone();
 
     std::thread::spawn(move || {
         let mut first = true;
+        let mut completion_tokens = 0;
+        let mut generated_text = String::new();
+        let start_time = std::time::Instant::now();
+        let mut first_token_time = None;
         
         let generator_result = generator.lock();
         if let Ok(mut gen) = generator_result {
@@ -129,6 +182,13 @@ async fn handle_streaming(
                 repeat_last_n,
                 |event| match event {
                     StreamEvent::Token(token) => {
+                        if first_token_time.is_none() {
+                            first_token_time = Some(start_time.elapsed());
+                        }
+                        
+                        generated_text.push_str(&token);
+                        completion_tokens += 1;
+                        
                         let delta = if first {
                             first = false;
                             Delta::with_role("assistant", &token)
@@ -164,7 +224,43 @@ async fn handle_streaming(
                             }],
                         };
                         let _ = tx.blocking_send(Ok(Event::default().json_data(chunk).unwrap()));
+
+                        // Send complete message before [DONE]
+                        let complete_response = ChatCompletionResponse {
+                            id: completion_id.clone(),
+                            object: "chat.completion".to_string(),
+                            created: timestamp,
+                            model: model_clone.clone(),
+                            choices: vec![Choice {
+                                index: 0,
+                                message: crate::server::types::ChatCompletionMessage {
+                                    role: "assistant".to_string(),
+                                    content: generated_text.clone(),
+                                },
+                                finish_reason: Some("stop".to_string()),
+                            }],
+                            usage: Usage::new(prompt_tokens, completion_tokens),
+                        };
+                        let _ = tx.blocking_send(Ok(Event::default().json_data(complete_response).unwrap()));
+
                         let _ = tx.blocking_send(Ok(Event::default().data("[DONE]")));
+
+                        let elapsed = start_time.elapsed();
+                        let tokens_per_sec = if elapsed.as_secs_f32() > 0.0 {
+                            completion_tokens as f32 / elapsed.as_secs_f32()
+                        } else {
+                            0.0
+                        };
+                        let ttft = first_token_time.map(|t| t.as_secs_f32()).unwrap_or(0.0);
+
+                        tracing::info!(
+                            "[{}] Streaming complete | output: {} tokens | time: {:.2}s | ttft: {:.2}s | speed: {:.1} tok/s",
+                            &request_id_clone[..8],
+                            completion_tokens,
+                            elapsed.as_secs_f32(),
+                            ttft,
+                            tokens_per_sec
+                        );
                     }
                 },
             );

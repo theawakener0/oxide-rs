@@ -13,7 +13,18 @@ pub async fn run(host: String, port: u16) -> Result<(), Box<dyn std::error::Erro
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
 
-    tracing::info!("Starting OpenAI-compatible server on http://{}", addr);
+    println!();
+    println!("┌─────────────────────────────────────────────┐");
+    println!("│  oxide-rs - OpenAI Compatible Server        │");
+    println!("│  Version: {}                                │", env!("CARGO_PKG_VERSION"));
+    println!("└─────────────────────────────────────────────┘");
+    println!();
+    tracing::info!("Server starting on http://{}", addr);
+    tracing::info!("API endpoints:");
+    tracing::info!("  - POST /v1/chat/completions");
+    tracing::info!("  - GET  /v1/models");
+    tracing::info!("CORS: enabled (permissive)");
+    println!();
 
     let state = Arc::new(AppState::new());
     let router = create_router(state);
@@ -23,7 +34,7 @@ pub async fn run(host: String, port: u16) -> Result<(), Box<dyn std::error::Erro
 
     loop {
         let (stream, remote) = listener.accept().await?;
-        tracing::debug!("Accepted connection from: {}", remote);
+        tracing::debug!("Connection accepted from: {}", remote);
 
         let router = router.clone();
 
@@ -39,8 +50,9 @@ pub async fn run(host: String, port: u16) -> Result<(), Box<dyn std::error::Erro
                 .serve_connection(io, service)
                 .await
             {
-                tracing::warn!("Error serving connection: {}", err);
+                tracing::warn!("Connection error from {}: {}", remote, err);
             }
         });
     }
 }
+

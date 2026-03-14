@@ -28,18 +28,27 @@ impl AppState {
         {
             let cache = self.model_cache.read().await;
             if let Some(generator) = cache.get(model_path) {
-                tracing::info!("Using cached model: {}", model_path);
+                let gen = generator.lock().unwrap();
+                let metadata = gen.metadata();
+                tracing::info!(
+                    "[MODEL] Using cached model: {} | layers: {} | ctx: {}",
+                    model_path,
+                    metadata.n_layer,
+                    metadata.context_length
+                );
                 return Ok(generator.clone());
             }
         }
 
-        tracing::info!("Loading model: {}", model_path);
+        tracing::info!("[MODEL] Loading model: {}", model_path);
 
         let path = Path::new(model_path);
         if !path.exists() {
             return Err(format!("Model file not found: {}", model_path).into());
         }
 
+        let load_start = std::time::Instant::now();
+        
         let generator = Generator::new(
             &path.to_path_buf(),
             None,
@@ -51,14 +60,26 @@ impl AppState {
             self.default_options.batch_size,
         )?;
 
+        let load_time = load_start.elapsed();
+        let metadata = generator.metadata();
+
+        tracing::info!(
+            "[MODEL] Model loaded successfully: {} | quant: {:?} | layers: {} | embed: {} | ctx: {} | vocab: {} | loaded in {:.2}s",
+            metadata.name,
+            metadata.quantization,
+            metadata.n_layer,
+            metadata.n_embd,
+            metadata.context_length,
+            metadata.vocab_size,
+            load_time.as_secs_f32()
+        );
+
         let generator = Arc::new(Mutex::new(generator));
 
         {
             let mut cache = self.model_cache.write().await;
             cache.insert(model_path.to_string(), generator.clone());
         }
-
-        tracing::info!("Model loaded and cached: {}", model_path);
 
         Ok(generator)
     }
