@@ -94,7 +94,6 @@ Features:
 - Streaming support with Server-Sent Events
 - OpenAI-compatible response format
 - CORS enabled for browser clients
-```
 
 ## TUI (Terminal UI)
 
