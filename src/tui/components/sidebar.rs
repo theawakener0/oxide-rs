@@ -36,7 +36,7 @@ impl Sidebar {
         let max_label_len = self
             .screens
             .iter()
-            .map(|s| s.icon().len() + 1 + s.label().len())
+            .map(|s| s.label().len() + 1)
             .max()
             .unwrap_or(8);
         self.width.max(max_label_len as u16).max(8)
@@ -64,7 +64,7 @@ impl Widget for Sidebar {
 
             let is_active = *screen == self.active_screen;
             let is_selected = *screen == self.selected_screen;
-            let label = format!("{} {}", screen.icon(), screen.label());
+            let label = format!("{}", screen.label());
 
             let x = content_area.x + 1;
             let style = if is_active {
