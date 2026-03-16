@@ -41,14 +41,6 @@ impl Screen {
             Screen::Settings => "Settings",
         }
     }
-
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Screen::Chat => "💬",
-            Screen::Models => "📦",
-            Screen::Settings => "⚙",
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
