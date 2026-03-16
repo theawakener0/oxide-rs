@@ -15,6 +15,7 @@ pub enum FocusArea {
     Sidebar,
     Main,
     Input,
+    DownloadInput,
 }
 
 impl Screen {
@@ -97,6 +98,27 @@ impl ChatMessage {
 }
 
 #[derive(Clone)]
+pub enum PendingAction {
+    RemoveModel(String),
+    #[allow(dead_code)]
+    RemoveModelConfirmed(String),
+}
+
+#[derive(Clone, PartialEq)]
+pub enum DownloadState {
+    Idle,
+    FetchingInfo(String),
+    Downloading {
+        repo_id: String,
+        filename: String,
+        bytes_downloaded: u64,
+        total_bytes: u64,
+    },
+    Completed(String),
+    Error(String),
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub model_path: Option<PathBuf>,
     pub options: GenerateOptions,
@@ -113,12 +135,15 @@ pub struct AppState {
     pub is_generating: bool,
     pub notification: Option<NotificationState>,
     pub show_help: bool,
+    pub pending_action: Option<PendingAction>,
     pub settings_dirty: bool,
     pub tokens_generated: usize,
     pub prompt_tokens: usize,
     pub tokens_per_second: f64,
     pub context_used: usize,
     pub context_limit: usize,
+    pub download_state: DownloadState,
+    pub download_input: String,
 }
 
 impl AppState {
@@ -139,12 +164,15 @@ impl AppState {
             is_generating: false,
             notification: None,
             show_help: false,
+            pending_action: None,
             settings_dirty: false,
             tokens_generated: 0,
             prompt_tokens: 0,
             tokens_per_second: 0.0,
             context_used: 0,
             context_limit: 4096,
+            download_state: DownloadState::Idle,
+            download_input: String::new(),
         }
     }
 
@@ -198,6 +226,24 @@ impl AppState {
         self.notification = None;
     }
 
+    pub fn request_remove_model(&mut self, model_id: String) {
+        self.pending_action = Some(PendingAction::RemoveModel(model_id));
+    }
+
+    pub fn clear_pending_action(&mut self) {
+        self.pending_action = None;
+    }
+
+    pub fn start_download_input(&mut self) {
+        self.download_input.clear();
+        self.download_state = DownloadState::Idle;
+    }
+
+    pub fn cancel_download(&mut self) {
+        self.download_input.clear();
+        self.download_state = DownloadState::Idle;
+    }
+
     pub fn clear_expired_notification(&mut self) {
         let should_clear = self
             .notification
@@ -229,10 +275,12 @@ impl AppState {
                 FocusArea::Sidebar => FocusArea::Main,
                 FocusArea::Main => FocusArea::Input,
                 FocusArea::Input => FocusArea::Sidebar,
+                FocusArea::DownloadInput => FocusArea::Sidebar,
             },
             Screen::Models | Screen::Settings => match self.focus_area {
                 FocusArea::Sidebar => FocusArea::Main,
-                FocusArea::Main | FocusArea::Input => FocusArea::Sidebar,
+                FocusArea::Main => FocusArea::DownloadInput,
+                FocusArea::DownloadInput | FocusArea::Input => FocusArea::Sidebar,
             },
         };
     }
@@ -243,10 +291,13 @@ impl AppState {
                 FocusArea::Sidebar => FocusArea::Input,
                 FocusArea::Input => FocusArea::Main,
                 FocusArea::Main => FocusArea::Sidebar,
+                FocusArea::DownloadInput => FocusArea::Main,
             },
             Screen::Models | Screen::Settings => match self.focus_area {
-                FocusArea::Sidebar => FocusArea::Main,
-                FocusArea::Main | FocusArea::Input => FocusArea::Sidebar,
+                FocusArea::Sidebar => FocusArea::DownloadInput,
+                FocusArea::DownloadInput => FocusArea::Main,
+                FocusArea::Main => FocusArea::Sidebar,
+                FocusArea::Input => FocusArea::Sidebar,
             },
         };
     }

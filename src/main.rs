@@ -17,6 +17,7 @@ use oxide_rs::model::{
     download_model, format_size, get_model_info, list_models, register_model, unregister_model,
 };
 use oxide_rs::server::run as server_run;
+use oxide_rs::tui::state::Screen;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -126,8 +127,33 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Some(ref repo_id) = cli.download {
+        handle_download(repo_id)?;
+        return Ok(());
+    }
+
+    if cli.models {
+        handle_list_models()?;
+        return Ok(());
+    }
+
+    if let Some(ref repo_id) = cli.info {
+        handle_info(repo_id)?;
+        return Ok(());
+    }
+
+    if let Some(ref model_id) = cli.remove {
+        handle_remove(model_id)?;
+        return Ok(());
+    }
+
     if cli.tui {
-        oxide_rs::tui::run(cli.model.clone(), cli.download.clone())?;
+        let initial_screen = if cli.models {
+            Some(Screen::Models)
+        } else {
+            None
+        };
+        oxide_rs::tui::run(cli.model.clone(), cli.download.clone(), initial_screen)?;
         return Ok(());
     }
 

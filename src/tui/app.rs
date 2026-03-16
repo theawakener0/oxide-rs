@@ -14,7 +14,7 @@ use crate::tui::components::status_bar::StatusBar;
 use crate::tui::screens::chat::ChatScreen;
 use crate::tui::screens::models::ModelsScreen;
 use crate::tui::screens::settings::SettingsScreen;
-use crate::tui::state::{AppState, FocusArea, NotificationLevel, Screen};
+use crate::tui::state::{AppState, FocusArea, NotificationLevel, PendingAction, Screen};
 use crate::{list_models, unregister_model, GenerateOptions, Model};
 
 static APP_STATE: Mutex<Option<AppState>> = Mutex::new(None);
@@ -31,17 +31,33 @@ enum WorkerCommand {
     Generate {
         prompt: String,
     },
+    Download {
+        repo_id: String,
+    },
     Shutdown,
 }
 
 enum WorkerEvent {
     ModelLoadStarted(String),
-    ModelLoaded { path: PathBuf },
-    ContextUpdated { used: usize, limit: usize },
+    ModelLoaded {
+        path: PathBuf,
+    },
+    ContextUpdated {
+        used: usize,
+        limit: usize,
+    },
     FirstToken,
     Token(String),
     GenerationStarted,
     GenerationFinished,
+    DownloadStarted(String),
+    DownloadProgress {
+        filename: String,
+        bytes_downloaded: u64,
+        total_bytes: u64,
+    },
+    DownloadCompleted(String),
+    DownloadError(String),
     Error(String),
 }
 
@@ -56,13 +72,18 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(model_path: Option<PathBuf>) -> Self {
+    pub fn new(model_path: Option<PathBuf>, initial_screen: Option<Screen>) -> Self {
         let backend = CrosstermBackend::new(std::io::stdout());
         let mut terminal = Terminal::new(backend).expect("Failed to create terminal");
         terminal.clear().expect("Failed to clear terminal");
 
         let mut state = AppState::new();
         state.model_path = model_path.clone();
+
+        if let Some(screen) = initial_screen {
+            state.set_current_screen(screen);
+        }
+
         if let Some(path) = &model_path {
             if let Ok(models) = crate::list_models() {
                 if let Some(index) = models.iter().position(|model| &model.path == path) {
@@ -252,6 +273,35 @@ impl App {
                         }
                     }
                 }
+                WorkerCommand::Download { repo_id } => {
+                    let repo_id_clone = repo_id.clone();
+                    let _ = tx.send(WorkerEvent::DownloadStarted(repo_id.clone()));
+
+                    match crate::model::download_model(&repo_id, None, |progress| {
+                        let _ = tx.send(WorkerEvent::DownloadProgress {
+                            filename: progress.filename.clone(),
+                            bytes_downloaded: progress.bytes_downloaded,
+                            total_bytes: progress.total_bytes,
+                        });
+                    }) {
+                        Ok((path, filename)) => {
+                            if let Err(e) = crate::register_model(&repo_id, &filename, path, 0) {
+                                let _ = tx.send(WorkerEvent::DownloadError(format!(
+                                    "Failed to register model: {}",
+                                    e
+                                )));
+                            } else {
+                                let _ = tx.send(WorkerEvent::DownloadCompleted(repo_id_clone));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(WorkerEvent::DownloadError(format!(
+                                "Download failed: {}",
+                                e
+                            )));
+                        }
+                    }
+                }
                 WorkerCommand::Shutdown => break,
             }
         }
@@ -327,6 +377,64 @@ impl App {
                     if let Some(state) = state_guard.as_mut() {
                         state.finish_thinking();
                         state.is_generating = false;
+                    }
+                }
+                WorkerEvent::DownloadStarted(repo_id) => {
+                    let mut state_guard = Self::state_mut();
+                    if let Some(state) = state_guard.as_mut() {
+                        state.download_state =
+                            crate::tui::state::DownloadState::FetchingInfo(repo_id);
+                        state.set_notification(NotificationLevel::Info, "Fetching model info...");
+                    }
+                }
+                WorkerEvent::DownloadProgress {
+                    filename,
+                    bytes_downloaded,
+                    total_bytes,
+                } => {
+                    let mut state_guard = Self::state_mut();
+                    if let Some(state) = state_guard.as_mut() {
+                        state.download_state = crate::tui::state::DownloadState::Downloading {
+                            repo_id: String::new(),
+                            filename: filename.clone(),
+                            bytes_downloaded,
+                            total_bytes,
+                        };
+                        let percent = if total_bytes > 0 {
+                            (bytes_downloaded as f64 / total_bytes as f64 * 100.0) as u32
+                        } else {
+                            0
+                        };
+                        let downloaded_mb = bytes_downloaded as f64 / 1_000_000.0;
+                        let total_mb = total_bytes as f64 / 1_000_000.0;
+                        state.set_notification(
+                            NotificationLevel::Info,
+                            format!(
+                                "Downloading: {:.1}/{:.1} MB ({}%)",
+                                downloaded_mb, total_mb, percent
+                            ),
+                        );
+                    }
+                }
+                WorkerEvent::DownloadCompleted(repo_id) => {
+                    let mut state_guard = Self::state_mut();
+                    if let Some(state) = state_guard.as_mut() {
+                        state.download_state =
+                            crate::tui::state::DownloadState::Completed(repo_id.clone());
+                        state.set_notification(
+                            NotificationLevel::Success,
+                            format!("Downloaded: {}", repo_id),
+                        );
+                        state.clear_pending_action();
+                    }
+                }
+                WorkerEvent::DownloadError(message) => {
+                    let mut state_guard = Self::state_mut();
+                    if let Some(state) = state_guard.as_mut() {
+                        state.download_state =
+                            crate::tui::state::DownloadState::Error(message.clone());
+                        state.set_notification(NotificationLevel::Error, message);
+                        state.clear_pending_action();
                     }
                 }
                 WorkerEvent::Error(message) => {
@@ -502,6 +610,109 @@ impl App {
         let mut state_guard = Self::state_mut();
         let state = state_guard.as_mut().unwrap();
 
+        if let Some(pending_action) = &state.pending_action {
+            match code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    if let crate::tui::state::PendingAction::RemoveModel(ref model_id) =
+                        *pending_action
+                    {
+                        let model_id = model_id.clone();
+                        let active_model_path = state.model_path.clone();
+                        drop(state_guard);
+
+                        let was_active = if let Some(ref active_path) = active_model_path {
+                            if let Ok(models) = list_models() {
+                                models
+                                    .iter()
+                                    .any(|m| m.id == model_id && m.path == *active_path)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        match unregister_model(&model_id) {
+                            Ok(Some(_)) => {
+                                let mut state_guard = Self::state_mut();
+                                if was_active {
+                                    state_guard.as_mut().unwrap().model_path = None;
+                                    state_guard.as_mut().unwrap().context_used = 0;
+                                    state_guard.as_mut().unwrap().context_limit = 0;
+                                }
+                                state_guard.as_mut().unwrap().set_notification(
+                                    NotificationLevel::Success,
+                                    format!("Removed model: {}", model_id),
+                                );
+                                state_guard.as_mut().unwrap().clear_pending_action();
+                            }
+                            Ok(None) => {
+                                let mut state_guard = Self::state_mut();
+                                state_guard.as_mut().unwrap().set_notification(
+                                    NotificationLevel::Error,
+                                    format!("Model not found: {}", model_id),
+                                );
+                                state_guard.as_mut().unwrap().clear_pending_action();
+                            }
+                            Err(err) => {
+                                let mut state_guard = Self::state_mut();
+                                state_guard.as_mut().unwrap().set_notification(
+                                    NotificationLevel::Error,
+                                    format!("Failed to remove model: {}", err),
+                                );
+                                state_guard.as_mut().unwrap().clear_pending_action();
+                            }
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    state.clear_pending_action();
+                    state.set_notification(NotificationLevel::Info, "Remove cancelled");
+                    return;
+                }
+                _ => return,
+            }
+        }
+
+        if state.focus_area == FocusArea::DownloadInput {
+            match code {
+                KeyCode::Tab => {
+                    state.cycle_focus_forward();
+                    return;
+                }
+                KeyCode::BackTab => {
+                    state.cycle_focus_backward();
+                    return;
+                }
+                KeyCode::Esc => {
+                    state.cancel_download();
+                    state.focus_area = FocusArea::Main;
+                    return;
+                }
+                KeyCode::Enter => {
+                    let repo_id = state.download_input.trim().to_string();
+                    if !repo_id.is_empty() {
+                        let _ = self.worker_tx.send(WorkerCommand::Download {
+                            repo_id: repo_id.clone(),
+                        });
+                        state.download_input.clear();
+                        state.focus_area = FocusArea::Main;
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    state.download_input.pop();
+                    return;
+                }
+                KeyCode::Char(c) => {
+                    state.download_input.push(c);
+                    return;
+                }
+                _ => return,
+            }
+        }
+
         match code {
             KeyCode::Tab => state.cycle_focus_forward(),
             KeyCode::BackTab => state.cycle_focus_backward(),
@@ -528,41 +739,13 @@ impl App {
             KeyCode::Char('x') => {
                 if let Ok(models) = list_models() {
                     if let Some(model) = models.get(state.selected_model_index) {
-                        let model_id = model.id.clone();
-                        let was_active = state.model_path.as_ref() == Some(&model.path);
-                        match unregister_model(&model_id) {
-                            Ok(Some(_)) => {
-                                if was_active {
-                                    state.model_path = None;
-                                    state.context_used = 0;
-                                    state.context_limit = 0;
-                                }
-                                state.set_notification(
-                                    NotificationLevel::Success,
-                                    format!("Removed model: {}", model_id),
-                                );
-                            }
-                            Ok(None) => {
-                                state.set_notification(
-                                    NotificationLevel::Error,
-                                    format!("Model not found: {}", model_id),
-                                );
-                            }
-                            Err(err) => {
-                                state.set_notification(
-                                    NotificationLevel::Error,
-                                    format!("Failed to remove model: {}", err),
-                                );
-                            }
-                        }
+                        state.request_remove_model(model.id.clone());
                     }
                 }
             }
             KeyCode::Char('d') => {
-                state.set_notification(
-                    NotificationLevel::Info,
-                    "Type a HuggingFace repo id in the chat input and use /download <repo> support next.",
-                );
+                state.start_download_input();
+                state.focus_area = FocusArea::DownloadInput;
             }
             KeyCode::Esc => {
                 if state.notification.is_some() {
@@ -760,6 +943,33 @@ impl App {
                     .title(" Help "),
             );
             f.render_widget(help, help_area);
+        }
+
+        if let Some(pending_action) = &state.pending_action {
+            if let PendingAction::RemoveModel(model_id) = pending_action {
+                let modal_width = 50u16;
+                let modal_height = 7u16;
+                let modal_area = ratatui::layout::Rect::new(
+                    area.x + (area.width.saturating_sub(modal_width)) / 2,
+                    area.y + (area.height.saturating_sub(modal_height)) / 2,
+                    modal_width,
+                    modal_height,
+                );
+
+                let confirm_text = format!("Remove model '{}'?", model_id);
+                let modal = ratatui::widgets::Paragraph::new(format!(
+                    "{}\n\n  [y] Yes  [n] No",
+                    confirm_text
+                ))
+                .block(
+                    ratatui::widgets::Block::bordered()
+                        .border_type(ratatui::widgets::BorderType::Double)
+                        .title(" Confirm "),
+                )
+                .style(ratatui::style::Style::new().fg(ratatui::style::Color::Yellow));
+
+                f.render_widget(modal, modal_area);
+            }
         }
     }
 }

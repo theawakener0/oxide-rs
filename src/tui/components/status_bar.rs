@@ -54,6 +54,7 @@ impl Widget for StatusBar<'_> {
             FocusArea::Sidebar => " Focus:Nav ",
             FocusArea::Main => " Focus:Main ",
             FocusArea::Input => " Focus:Input ",
+            FocusArea::DownloadInput => " Focus:Download ",
         };
         for c in focus_text.chars() {
             if x < content_area.x + content_area.width {
