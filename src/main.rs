@@ -124,35 +124,7 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "oxide_rs=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
     let cli = Cli::parse();
-
-    if let Some(repo_id) = &cli.download {
-        handle_download(repo_id)?;
-        return Ok(());
-    }
-
-    if cli.models {
-        handle_list_models()?;
-        return Ok(());
-    }
-
-    if let Some(repo_id) = &cli.info {
-        handle_info(repo_id)?;
-        return Ok(());
-    }
-
-    if let Some(model_id) = &cli.remove {
-        handle_remove(model_id)?;
-        return Ok(());
-    }
 
     if cli.tui {
         oxide_rs::tui::run(cli.model.clone(), cli.download.clone())?;
@@ -160,6 +132,14 @@ fn main() -> Result<()> {
     }
 
     if cli.server {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "oxide_rs=info".into()),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+
         let runtime = tokio::runtime::Runtime::new()?;
         if let Err(e) = runtime.block_on(server_run(cli.host, cli.port)) {
             eprintln!("Server error: {}", e);
